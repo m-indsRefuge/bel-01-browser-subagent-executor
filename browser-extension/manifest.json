@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "BEL-01 ChatGPT Bridge",
+  "version": "0.1.0",
+  "description": "Local-only Chrome transport for BEL-01 browser sub-agents.",
+  "permissions": [
+    "debugger",
+    "storage",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://chatgpt.com/*",
+    "http://127.0.0.1:9233/*"
+  ],
+  "background": {
+    "service_worker": "service-worker.js",
+    "type": "module"
+  },
+  "options_page": "options.html",
+  "action": {
+    "default_title": "BEL-01 ChatGPT Bridge"
+  }
+}
