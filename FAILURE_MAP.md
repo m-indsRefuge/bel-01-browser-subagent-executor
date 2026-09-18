@@ -173,16 +173,19 @@ editable composer remains.
 Do not:
 Do not guess which element to write to when target identity is ambiguous.
 
-## Composer draft overwrite
+## Composer draft overwrite / unsafe clear
 Failure symptom:
-A draft-write command targets a composer that already contains meaningful user text.
+A draft-write command targets a composer that already contains meaningful user text, or a clear
+command targets text that no longer matches the BEL-01 draft.
 
-Current control:
+Current controls:
 BEL-01B.1 refuses to overwrite a non-empty composer. Empty editor placeholder artifacts such as
 zero-width characters are ignored when deciding whether the composer is meaningfully empty.
+Clearing requires the caller to provide the expected draft text, and BEL-01 refuses to clear unless
+the current composer still exactly matches that expected draft after newline normalization.
 
 Do not:
-Do not add an overwrite flag to this milestone.
+Do not add an overwrite flag or unconditional clear command to this milestone.
 
 ## Composer draft partial mutation / uncertain state
 Failure symptom:
@@ -217,6 +220,22 @@ Tests:
 Do not:
 Do not add any submit mechanism to BEL-01B.1. Submission is a separate milestone and capability
 decision.
+
+## Generated Runtime.evaluate escape drift
+Failure symptom:
+A generated composer mutation expression passes module parsing/tests but fails inside
+Runtime.evaluate with a syntax error or malformed regular expression.
+
+Cause:
+The browser module generates JavaScript inside a JavaScript template literal, so regex/string
+escape sequences require an additional escaping layer.
+
+Current control:
+Focused draft tests assert that generated expressions preserve literal \\u200B and \\r\\n
+escapes before Chrome execution.
+
+Tests:
+- test/chrome-extension-composer-draft.test.ts
 
 ## Browser protocol drift
 Symptoms include composer discovery failure, prompt binding failure, response reconstruction failure, or CHATGPT_UI_CHANGED.
