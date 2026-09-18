@@ -206,6 +206,7 @@ export function createChatGptSubagentService(): ChatGptSubagentService {
       if (request.decision === "grant") {
         agent.grants.add(pending.capability)
       }
+      agent.pendingPermission = undefined
 
       const decisionPrompt = bsapPermissionDecisionPrompt({
         requestId: pending.requestId,
@@ -220,11 +221,13 @@ export function createChatGptSubagentService(): ChatGptSubagentService {
         decisionPrompt
       )
 
-      agent.pendingPermission = undefined
       persistAgent(parentAgent, agent)
       operationTransferred = true
       return turnId
     } catch (error) {
+      if (!operationTransferred && !agent.pendingPermission) {
+        agent.pendingPermission = pending
+      }
       if (
         request.decision === "grant" &&
         !alreadyGranted &&
@@ -232,7 +235,10 @@ export function createChatGptSubagentService(): ChatGptSubagentService {
       ) {
         agent.grants.delete(pending.capability)
       }
-      if (!operationTransferred) agent.status = "idle"
+      if (!operationTransferred) {
+        agent.status = "idle"
+        persistAgent(parentAgent, agent)
+      }
       throw error
     } finally {
       if (!operationTransferred) {
