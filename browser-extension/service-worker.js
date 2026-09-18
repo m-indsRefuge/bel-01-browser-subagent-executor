@@ -486,11 +486,14 @@ async function handleCommand(command) {
             `turn_id ${turnId} is already bound to a different tab or prompt.`
           )
         }
-        if (existing.status === "bound") {
-          return publicAgentTurnReceipt(existing)
+        if (["bound", "armed", "uncertain"].includes(existing.status)) {
+          return {
+            ...publicAgentTurnReceipt(existing),
+            no_resubmit: true,
+          }
         }
         throw new Error(
-          `turn_id ${turnId} is already ${existing.status}; refusing duplicate submission.`
+          `turn_id ${turnId} has unsupported ledger status ${existing.status}; refusing duplicate submission.`
         )
       }
 
@@ -608,16 +611,27 @@ async function handleCommand(command) {
         return publicAgentTurnReceipt(bound)
       } catch (error) {
         const current = (await loadAgentTurnReceipt(turnId)) ?? armed
-        if (current.status !== "bound") {
-          await saveAgentTurnReceipt({
-            ...current,
-            status: "uncertain",
-            click_attempted: clickAttempted,
-            uncertain_at: new Date().toISOString(),
-            last_error: error instanceof Error ? error.message : String(error),
-          })
+        if (!clickAttempted) throw error
+
+        if (current.status === "bound") {
+          return {
+            ...publicAgentTurnReceipt(current),
+            no_resubmit: true,
+          }
         }
-        throw error
+
+        const uncertain = {
+          ...current,
+          status: "uncertain",
+          click_attempted: true,
+          uncertain_at: current.uncertain_at ?? new Date().toISOString(),
+          last_error: error instanceof Error ? error.message : String(error),
+        }
+        await saveAgentTurnReceipt(uncertain)
+        return {
+          ...publicAgentTurnReceipt(uncertain),
+          no_resubmit: true,
+        }
       }
     }
 
