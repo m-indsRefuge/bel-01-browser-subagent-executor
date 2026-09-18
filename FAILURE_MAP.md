@@ -382,6 +382,28 @@ Do not:
 Do not delete or bypass an uncertain ledger receipt merely to retry a submission. Do not reuse an
 ambiguous child tab for a different first-turn prompt.
 
+## Submission ledger storage loss
+Failure symptom:
+The extension is removed, its site/extension storage is cleared, or the Chrome profile is reset
+after a submission became armed or uncertain.
+
+Risk:
+The persistent at-most-once receipt can be lost, allowing a later caller to mistake the logical
+submission for a new one.
+
+Current boundary:
+BEL-01B.2a stores submission receipts in `chrome.storage.local`, which survives MV3 service-worker
+restarts and normal Chrome restarts but is not an external durable transaction log.
+
+Safe operation:
+Do not uninstall the BEL-01 extension, clear its storage, or reset the Chrome profile while an
+armed/submitted/uncertain receipt matters. A later BEL-01/Shellby integration should mirror durable
+turn identity into WSL/SQLite before this guarantee is treated as profile-independent.
+
+Do not:
+Do not interpret missing ledger state after extension-storage loss as proof that no prior submission
+occurred.
+
 ## Send-button ambiguity
 Failure symptom:
 Zero or multiple visible enabled elements match the allow-listed Send-button selectors.
