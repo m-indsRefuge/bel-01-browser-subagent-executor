@@ -1,26 +1,21 @@
-import type { Browser, BrowserContext, Page } from "playwright-core"
 import { join } from "node:path"
 
 import { MCP_CONFIG } from "../../config.js"
 import { getAgentIdentity, type AgentIdentity } from "../../server/agent-context.js"
 import {
-  assertAuthenticated,
-  createBackgroundPage,
   delay,
-  dismissBlockingChatGptOverlay,
-  enterPrompt,
   extractConversationId,
-  findComposer,
-  forkLatestConversationTurn,
   isChatGptUrl,
-  navigateChatGptPage,
-  navigateAndCaptureConversationPayload,
-  submitComposer,
   throwIfAborted,
   waitForPromise,
 } from "./chatgpt-subagent-browser.js"
-import { observeAssistantResponse, type AssistantResponseObservation } from "./chatgpt-subagent-observer.js"
-import { extractConversationMessages, findLatestAssistantAfterPrompt } from "./chatgpt-subagent-protocol.js"
+import type { AssistantResponseObservation } from "./chatgpt-subagent-observer.js"
+import { createExtensionSubagentTransport } from "./chatgpt-subagent-extension-transport.js"
+import { createPlaywrightSubagentTransport } from "./chatgpt-subagent-playwright-transport.js"
+import type {
+  ChatGptManagedPage,
+  ChatGptSubagentTransport,
+} from "./chatgpt-subagent-transport.js"
 import { createSubagentStore } from "./subagent-store.js"
 import {
   ChatGptSubagentError,
@@ -36,11 +31,9 @@ import {
 const AGENT_IDLE_TTL_MS = 30 * 60_000
 const STALE_TURN_RECOVERY_MS = 3 * 60_000
 const CLEANUP_INTERVAL_MS = 60_000
-const CONNECT_TIMEOUT_MS = 3_000
 const MIN_INTER_TURN_DELAY_MS = 1_500
 const INTERACTION_DELAY_MS = 300
 const RATE_LIMIT_COOLDOWN_MS = 15 * 60_000
-const RATE_LIMIT_SELECTOR = '[data-testid="modal-conversation-history-rate-limit"]'
 const RATE_LIMIT_DISMISS_SETTLE_MS = 250
 const CLONE_INITIAL_SETTLE_MS = 5_000
 const RATE_LIMIT_ERROR_MESSAGE =
@@ -57,7 +50,7 @@ interface BrowserAgentState {
   kind: "subagent" | "clone"
   memory: boolean
   status: BrowserAgentStatus
-  page?: Page
+  page?: ChatGptManagedPage
   conversationUrl?: string
   lastCompletedAt?: number
   lastUsedAt: number
@@ -94,10 +87,11 @@ interface SubagentScope {
 export function createChatGptSubagentService(): ChatGptSubagentService {
   const store = createSubagentStore(join(MCP_CONFIG.stateDir, "subagents.sqlite"))
   const scopes = new Map<AgentIdentity | undefined, SubagentScope>()
+  const transport: ChatGptSubagentTransport =
+    MCP_CONFIG.chatGpt.transport === "extension"
+      ? createExtensionSubagentTransport()
+      : createPlaywrightSubagentTransport()
   let rateLimitedUntil = 0
-  let browser: Browser | undefined
-  let context: BrowserContext | undefined
-  let connectPromise: Promise<void> | undefined
   let disposed = false
 
   const cleanupTimer = setInterval(() => void cleanupIdleAgents(), CLEANUP_INTERVAL_MS)
