@@ -417,6 +417,189 @@ async function handleCommand(command) {
       }
     }
 
+    case "submit_composer_once": {
+      const tab = await requireChatGptTab(payload.tab_id)
+      if (!attachedTabs.has(tab.id)) {
+        throw new Error(`Tab ${tab.id} is not attached. Run attach first.`)
+      }
+
+      const submissionId = validateSubmissionId(payload.submission_id)
+      const text = validateComposerDraft(payload.text)
+      const promptSha256 = await sha256Hex(text)
+      const existing = await loadSubmissionReceipt(submissionId)
+
+      if (existing) {
+        if (existing.tab_id !== tab.id || existing.prompt_sha256 !== promptSha256) {
+          throw new Error(
+            `submission_id ${submissionId} is already bound to a different tab or prompt.`
+          )
+        }
+        if (existing.status === "bound") {
+          return publicSubmissionReceipt(existing)
+        }
+        throw new Error(
+          `submission_id ${submissionId} is already ${existing.status}; refusing duplicate submission. ` +
+            "Use recover_prompt_submission instead."
+        )
+      }
+
+      if (extractConversationBinding(tab.url)) {
+        throw new Error("BEL-01B.2a requires a fresh ChatGPT child tab with no bound conversation.")
+      }
+
+      const comparison = await evaluateDraftComparison(tab.id, text)
+      if (!comparison.exact_match) {
+        throw new Error("BEL-01B.2a requires the composer to exactly match the expected prompt before submission.")
+      }
+
+      const armed = {
+        submission_id: submissionId,
+        status: "armed",
+        tab_id: tab.id,
+        prompt_sha256: promptSha256,
+        armed_at: new Date().toISOString(),
+      }
+      await saveSubmissionReceipt(armed)
+
+      let clicked = false
+      try {
+        const evaluation = await chrome.debugger.sendCommand(
+          { tabId: tab.id },
+          "Runtime.evaluate",
+          {
+            expression: buildSubmitButtonClickExpression(),
+            returnByValue: true,
+            awaitPromise: false,
+            userGesture: true,
+          }
+        )
+
+        if (evaluation.exceptionDetails) {
+          const message =
+            evaluation.exceptionDetails.exception?.description ??
+            evaluation.exceptionDetails.text ??
+            "Prompt submission failed inside the page runtime."
+          throw new Error(message)
+        }
+
+        const clickResult = evaluation.result?.value
+        if (!clickResult?.clicked) {
+          throw new Error("BEL-01B.2a did not receive a positive Send-button click receipt.")
+        }
+
+        clicked = true
+        await saveSubmissionReceipt({
+          ...armed,
+          status: "submitted_unbound",
+          clicked_at: new Date().toISOString(),
+          send_selector: clickResult.selector_hint ?? null,
+        })
+
+        const binding = await waitForConversationBinding(tab.id, SUBMISSION_BIND_TIMEOUT_MS)
+        if (!binding) {
+          throw new Error(
+            "Prompt may have been submitted, but no conversation binding appeared before timeout. " +
+              "Do not retry. Use recover_prompt_submission."
+          )
+        }
+
+        const bound = {
+          ...armed,
+          status: "bound",
+          clicked_at: new Date().toISOString(),
+          conversation_id: binding.conversation_id,
+          conversation_url: binding.conversation_url,
+          bound_at: new Date().toISOString(),
+        }
+        await saveSubmissionReceipt(bound)
+        return publicSubmissionReceipt(bound)
+      } catch (error) {
+        const current = (await loadSubmissionReceipt(submissionId)) ?? armed
+        if (current.status !== "bound") {
+          await saveSubmissionReceipt({
+            ...current,
+            status: "uncertain",
+            click_observed: clicked,
+            uncertain_at: new Date().toISOString(),
+            last_error: error instanceof Error ? error.message : String(error),
+          })
+        }
+        throw error
+      }
+    }
+
+    case "recover_prompt_submission": {
+      const submissionId = validateSubmissionId(payload.submission_id)
+      const receipt = await loadSubmissionReceipt(submissionId)
+      if (!receipt) {
+        throw new Error(`Unknown submission_id: ${submissionId}`)
+      }
+
+      if (receipt.status === "bound") {
+        return publicSubmissionReceipt(receipt)
+      }
+
+      let tab
+      try {
+        tab = await chrome.tabs.get(receipt.tab_id)
+      } catch {
+        const uncertain = {
+          ...receipt,
+          status: "uncertain",
+          recovery_checked_at: new Date().toISOString(),
+          recovery_note: "Original child tab no longer exists; submission was not retried.",
+        }
+        await saveSubmissionReceipt(uncertain)
+        return {
+          ...publicSubmissionReceipt(uncertain),
+          tab_present: false,
+          no_resubmit: true,
+        }
+      }
+
+      if (!tab.url || !isChatGptUrl(tab.url)) {
+        const uncertain = {
+          ...receipt,
+          status: "uncertain",
+          recovery_checked_at: new Date().toISOString(),
+          recovery_note: "Original tab is no longer a ChatGPT tab; submission was not retried.",
+        }
+        await saveSubmissionReceipt(uncertain)
+        return {
+          ...publicSubmissionReceipt(uncertain),
+          tab_present: true,
+          no_resubmit: true,
+        }
+      }
+
+      const binding = extractConversationBinding(tab.url)
+      if (binding) {
+        const bound = {
+          ...receipt,
+          status: "bound",
+          conversation_id: binding.conversation_id,
+          conversation_url: binding.conversation_url,
+          bound_at: receipt.bound_at ?? new Date().toISOString(),
+          recovery_checked_at: new Date().toISOString(),
+        }
+        await saveSubmissionReceipt(bound)
+        return publicSubmissionReceipt(bound)
+      }
+
+      const uncertain = {
+        ...receipt,
+        status: "uncertain",
+        recovery_checked_at: new Date().toISOString(),
+        recovery_note: "No conversation binding is visible yet; submission was not retried.",
+      }
+      await saveSubmissionReceipt(uncertain)
+      return {
+        ...publicSubmissionReceipt(uncertain),
+        tab_present: true,
+        no_resubmit: true,
+      }
+    }
+
     case "detach": {
       const tab = await requireChatGptTab(payload.tab_id)
       if (attachedTabs.has(tab.id)) {
