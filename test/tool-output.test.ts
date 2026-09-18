@@ -234,6 +234,25 @@ const toolFamilyCases: Array<{ tool: string; structuredContent: unknown; expecte
       '---- turn_id=reviewer_turn_1 status=completed ----\n\n## Review\n\nArchitecture looks good.\n\n---- turn_id=tester_turn_1 status=running activity="Using tools" activity_age_ms=2750 ----',
   },
   {
+    tool: "subagent_result",
+    structuredContent: {
+      turns: [
+        {
+          turn_id: "reviewer_turn_1",
+          status: "permission_required",
+          permission_request: {
+            request_id: "reviewer_turn_1_permission",
+            capability: "web",
+            reason: "Need current upstream documentation",
+            scope: "official documentation only",
+          },
+        },
+      ],
+    },
+    expected:
+      '---- turn_id=reviewer_turn_1 status=permission_required request_id=reviewer_turn_1_permission capability=web ----\n\nreason="Need current upstream documentation" scope="official documentation only"',
+  },
+  {
     tool: "fetch_url",
     structuredContent: {
       url: "https://example.com/docs",
