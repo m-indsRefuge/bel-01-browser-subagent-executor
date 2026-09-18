@@ -43,5 +43,5 @@ export interface ChatGptSubagentTransport {
     conversationUrl: string,
     prompt: string,
     expectedUserTurnCount: number
-  ): Promise<string | undefined>
+  ): Promise<{ response?: string; page?: ChatGptManagedPage }>
 }
