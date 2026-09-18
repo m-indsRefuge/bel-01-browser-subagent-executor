@@ -173,7 +173,9 @@ export function createPlaywrightSubagentTransport(): ChatGptSubagentTransport {
     },
 
     async forkLatestPage(page, signal) {
-      return wrap(await forkLatestConversationTurn(unwrap(page).native, signal))
+      const managed = unwrap(page)
+      const forked = await forkLatestConversationTurn(managed.native, signal)
+      return forked === managed.native ? managed : wrap(forked)
     },
 
     async recoverSubmittedTurn(page, conversationUrl, prompt, expectedUserTurnCount) {
