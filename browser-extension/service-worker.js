@@ -704,7 +704,7 @@ async function handleCommand(command) {
             ...receipt,
             response_observed_at: observedAt,
             response_sha256: responseSha256,
-            assistant_characters: snapshot.response_total_characters,
+            response_total_characters: snapshot.response_total_characters,
             response_truncated: snapshot.response_truncated === true,
           })
 
