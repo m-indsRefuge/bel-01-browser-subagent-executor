@@ -1,11 +1,13 @@
 import assert from "node:assert/strict"
+import { readFile } from "node:fs/promises"
 import test from "node:test"
 
 import {
+  DRAFT_STABILIZATION_MS,
   MAX_DRAFT_CHARACTERS,
-  buildComposerDraftClearExpression,
   buildComposerDraftCompareExpression,
-  buildComposerDraftWriteExpression,
+  buildComposerDraftPrepareClearExpression,
+  buildComposerDraftPrepareWriteExpression,
   validateComposerDraft,
 } from "../browser-extension/composer-draft.js"
 
@@ -16,61 +18,53 @@ test("composer draft validation rejects empty and oversized payloads", () => {
     /exceeds/
   )
   assert.equal(validateComposerDraft("BEL-01 draft canary"), "BEL-01 draft canary")
+  assert.equal(DRAFT_STABILIZATION_MS, 750)
 })
 
-test("composer draft expression safely encodes arbitrary text", () => {
-  const text = 'quote " slash \\ newline\n</script> ' + "$" + "{notInterpolation}"
-  const expression = buildComposerDraftWriteExpression(text)
+test("write preparation is bounded to one visible empty editable composer", () => {
+  const expression = buildComposerDraftPrepareWriteExpression()
 
-  assert.ok(expression.includes(JSON.stringify(text)))
   assert.ok(expression.includes("candidates.length !== 1"))
   assert.ok(expression.includes("refuses to overwrite a non-empty composer"))
-})
-
-test("composer draft commands contain no submission primitive", () => {
-  const expressions = [
-    buildComposerDraftWriteExpression("BEL-01 draft canary"),
-    buildComposerDraftClearExpression("BEL-01 draft canary"),
-  ]
+  assert.ok(expression.includes("element.focus()"))
+  assert.ok(expression.includes("selection_prepared: false"))
 
   const forbidden = [
+    "execCommand",
     ".click(",
     "requestSubmit",
     ".submit(",
     "KeyboardEvent",
-    "dispatchKeyEvent",
-    "keyDown",
-    "keyUp",
     'key: "Enter"',
     "backend-api/conversation",
   ]
 
-  for (const expression of expressions) {
-    for (const token of forbidden) {
-      assert.equal(
-        expression.includes(token),
-        false,
-        `draft mutation must not contain submission primitive ${token}`
-      )
-    }
-
-    assert.ok(expression.includes("submitted: false"))
-    assert.ok(expression.includes("candidates.length !== 1"))
+  for (const token of forbidden) {
+    assert.equal(expression.includes(token), false, `write preparation must not contain ${token}`)
   }
 })
 
-test("composer draft clear reports an empty verified non-submitted composer", () => {
-  const expression = buildComposerDraftClearExpression("BEL-01 draft canary")
+test("clear preparation requires exact expected draft and only selects it", () => {
+  const expression = buildComposerDraftPrepareClearExpression("BEL-01 draft canary")
 
-  assert.ok(expression.includes('const mode = "clear"'))
-  assert.ok(expression.includes('const expectedText = mode === "write" ? intendedText : ""'))
-  assert.ok(expression.includes("refuses to clear composer content that does not exactly match the expected draft"))
-  assert.ok(expression.includes("composer_empty: composerEmpty"))
-  assert.ok(expression.includes("verified: true"))
-  assert.ok(expression.includes("replace(/\\u200B/g, \"\").trim()"))
-  assert.ok(expression.includes("replace(/\\r\\n/g, \"\\n\")"))
+  assert.ok(expression.includes("does not exactly match the expected draft"))
+  assert.ok(expression.includes("selection_prepared: true"))
+  assert.ok(expression.includes("selectNodeContents"))
+  assert.ok(expression.includes("setSelectionRange"))
+  assert.ok(expression.includes("element.focus()"))
+
+  const forbidden = [
+    "execCommand",
+    ".click(",
+    "requestSubmit",
+    ".submit(",
+    'key: "Enter"',
+  ]
+
+  for (const token of forbidden) {
+    assert.equal(expression.includes(token), false, `clear preparation must not contain ${token}`)
+  }
 })
-
 
 test("draft comparison probe returns metadata only", () => {
   const expression = buildComposerDraftCompareExpression("BEL-01 draft canary")
@@ -94,5 +88,29 @@ test("draft comparison probe returns metadata only", () => {
 
   for (const token of forbidden) {
     assert.equal(expression.includes(token), false, `comparison must not return ${token}`)
+  }
+})
+
+test("service worker uses text insertion and backspace only, never Enter or submit", async () => {
+  const source = await readFile(
+    new URL("../browser-extension/service-worker.js", import.meta.url),
+    "utf8"
+  )
+
+  assert.ok(source.includes('"Input.insertText"'))
+  assert.ok(source.includes('key: "Backspace"'))
+  assert.ok(source.includes("DRAFT_STABILIZATION_MS"))
+  assert.ok(source.includes("Do not retry automatically"))
+
+  const forbidden = [
+    'key: "Enter"',
+    'code: "Enter"',
+    "requestSubmit",
+    ".submit(",
+    'Input.dispatchKeyEvent",\n        {\n          type: "rawKeyDown",\n          key: "Enter"',
+  ]
+
+  for (const token of forbidden) {
+    assert.equal(source.includes(token), false, `service worker must not contain submission primitive ${token}`)
   }
 })
