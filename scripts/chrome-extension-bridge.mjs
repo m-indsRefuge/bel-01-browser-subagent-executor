@@ -10,7 +10,8 @@ const DEFAULT_PORT = Number.parseInt(process.env.BEL01_BRIDGE_PORT ?? "9233", 10
 const DEFAULT_TOKEN_PATH = join(repoRoot, ".shellby", "chrome-extension-bridge.token")
 const MAX_BODY_BYTES = 2 * 1024 * 1024
 const MAX_EVENTS = 500
-const LONG_POLL_MS = 20_000
+const LONG_POLL_MS = Number.parseInt(process.env.BEL01_BRIDGE_LONG_POLL_MS ?? "10000", 10)
+const COMMAND_TTL_MS = Number.parseInt(process.env.BEL01_BRIDGE_COMMAND_TTL_MS ?? "45000", 10)
 
 export async function loadOrCreateBridgeToken(path = DEFAULT_TOKEN_PATH) {
   try {
@@ -29,7 +30,13 @@ export async function loadOrCreateBridgeToken(path = DEFAULT_TOKEN_PATH) {
   return (await readFile(path, "utf8")).trim()
 }
 
-export function createBridgeServer({ host = DEFAULT_HOST, port = DEFAULT_PORT, token }) {
+export function createBridgeServer({
+  host = DEFAULT_HOST,
+  port = DEFAULT_PORT,
+  token,
+  longPollMs = LONG_POLL_MS,
+  commandTtlMs = COMMAND_TTL_MS,
+}) {
   if (!token) throw new Error("BEL-01 Chrome bridge requires an authentication token.")
 
   const commands = []
@@ -57,6 +64,8 @@ export function createBridgeServer({ host = DEFAULT_HOST, port = DEFAULT_PORT, t
           extension_connected: extensionLastSeenAt !== null && Date.now() - extensionLastSeenAt < 45_000,
           extension_client_id: extensionClientId,
           queued_commands: commands.length,
+          oldest_queued_age_ms:
+            commands.length > 0 ? Math.max(0, Date.now() - Date.parse(commands[0].created_at)) : 0,
           pending_results: results.size,
           event_count: events.length,
         })
@@ -75,11 +84,13 @@ export function createBridgeServer({ host = DEFAULT_HOST, port = DEFAULT_PORT, t
           return
         }
 
+        const now = Date.now()
         const command = {
           id: randomUUID(),
           type: body.type,
           payload: body.payload && typeof body.payload === "object" ? body.payload : {},
-          created_at: new Date().toISOString(),
+          created_at: new Date(now).toISOString(),
+          expires_at: new Date(now + commandTtlMs).toISOString(),
         }
         commands.push(command)
         wakeOneWaiter()
@@ -109,7 +120,9 @@ export function createBridgeServer({ host = DEFAULT_HOST, port = DEFAULT_PORT, t
         extensionLastSeenAt = Date.now()
         extensionClientId = url.searchParams.get("client_id") || "unknown"
 
+        expireQueuedCommands()
         if (commands.length === 0) await waitForCommand()
+        expireQueuedCommands()
         const command = commands.shift()
 
         if (!command) {
@@ -162,7 +175,7 @@ export function createBridgeServer({ host = DEFAULT_HOST, port = DEFAULT_PORT, t
       const timer = setTimeout(() => {
         waiters.delete(done)
         resolve()
-      }, LONG_POLL_MS)
+      }, longPollMs)
       const done = () => {
         clearTimeout(timer)
         waiters.delete(done)
@@ -175,6 +188,25 @@ export function createBridgeServer({ host = DEFAULT_HOST, port = DEFAULT_PORT, t
   function wakeOneWaiter() {
     const waiter = waiters.values().next().value
     waiter?.()
+  }
+
+  function expireQueuedCommands() {
+    const now = Date.now()
+    for (let index = commands.length - 1; index >= 0; index -= 1) {
+      const command = commands[index]
+      const expiresAt = Date.parse(command.expires_at)
+      if (!Number.isFinite(expiresAt) || expiresAt > now) continue
+
+      commands.splice(index, 1)
+      if (!results.has(command.id)) {
+        results.set(command.id, {
+          id: command.id,
+          ok: false,
+          error: "BEL-01 bridge command expired before extension delivery; it was not executed.",
+          received_at: new Date().toISOString(),
+        })
+      }
+    }
   }
 
   return {
