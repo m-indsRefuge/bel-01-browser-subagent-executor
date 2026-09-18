@@ -210,18 +210,26 @@ Do not add an overwrite flag or unconditional clear command to this milestone.
 ## Composer draft partial mutation / uncertain state
 Failure symptom:
 The browser mutates the composer but subsequent verification fails or Runtime.evaluate returns an
-exception after mutation began.
+exception after mutation began, or an exact-match clear refuses text that appears visually identical.
 
 Risk:
-The caller may not know whether some or all draft text is now present.
+The caller may not know whether some or all draft text is now present, and contenteditable editors
+may normalize line endings, non-breaking spaces, zero-width characters, or trailing newlines after
+framework re-render.
 
-Current control:
-The command verifies the post-mutation text without returning it. A failed write must not be
-automatically retried. The next action is inspect the same isolated tab and visually confirm state,
-or deliberately clear the composer.
+Current controls:
+The write command verifies the post-mutation text without returning it. A failed write must not be
+automatically retried. The metadata-only `compare_composer_draft` probe reports lengths, exact and
+canonical match flags, first-difference index, and counts of benign normalization characters without
+returning composer text.
+
+Safe recovery:
+Run `compare_composer_draft` against the same expected draft before changing the clear policy.
+Only widen matching rules when the observed difference is explicitly understood and tested.
 
 Do not:
-Do not treat a failed write as proof that no mutation occurred.
+Do not treat a failed write as proof that no mutation occurred. Do not weaken exact-match clearing
+based on visual similarity alone.
 
 ## Accidental prompt submission
 Risk:
