@@ -4,4 +4,4 @@ export function validateComposerDraft(text: unknown): string
 
 export function buildComposerDraftWriteExpression(text: string): string
 
-export function buildComposerDraftClearExpression(): string
+export function buildComposerDraftClearExpression(expectedText: string): string
