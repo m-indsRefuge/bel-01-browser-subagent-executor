@@ -132,6 +132,17 @@ async function handleCommand(command) {
       return { tab: publicTab(tab) }
     }
 
+    case "show_chatgpt_tab": {
+      const tab = await requireChatGptTab(payload.tab_id)
+      await chrome.tabs.update(tab.id, { active: true })
+      await chrome.windows.update(tab.windowId, { focused: true })
+      const shown = await chrome.tabs.get(tab.id)
+      return {
+        tab: publicTab(shown),
+        focused_window_id: tab.windowId,
+      }
+    }
+
     case "create_chatgpt_tab": {
       const url = payload.url ?? CHATGPT_ORIGIN
       assertChatGptUrl(url)
@@ -323,10 +334,36 @@ async function handleCommand(command) {
       }
 
       const prepared = preparation.result?.value
-      if (!prepared?.focused || !prepared?.selection_prepared) {
-        throw new Error("Composer draft clear preparation did not preserve the expected selection.")
+      if (!prepared?.focused) {
+        throw new Error("Composer draft clear preparation did not focus the expected editor.")
       }
 
+      const selectAllModifier = /Mac/i.test(navigator.platform) ? 4 : 2
+
+      await chrome.debugger.sendCommand(
+        { tabId: tab.id },
+        "Input.dispatchKeyEvent",
+        {
+          type: "rawKeyDown",
+          key: "a",
+          code: "KeyA",
+          modifiers: selectAllModifier,
+          windowsVirtualKeyCode: 65,
+          nativeVirtualKeyCode: 65,
+        }
+      )
+      await chrome.debugger.sendCommand(
+        { tabId: tab.id },
+        "Input.dispatchKeyEvent",
+        {
+          type: "keyUp",
+          key: "a",
+          code: "KeyA",
+          modifiers: selectAllModifier,
+          windowsVirtualKeyCode: 65,
+          nativeVirtualKeyCode: 65,
+        }
+      )
       await chrome.debugger.sendCommand(
         { tabId: tab.id },
         "Input.dispatchKeyEvent",
