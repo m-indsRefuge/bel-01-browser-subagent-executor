@@ -193,3 +193,40 @@ test("submission ledger never persists prompt text or exposes its hash", async (
   const publicBlock = source.slice(publicStart, publicEnd)
   assert.equal(publicBlock.includes("prompt_sha256"), false)
 })
+
+
+test("production agent-turn submission is ledgered and replay-safe", async () => {
+  const source = await readFile(
+    new URL("../browser-extension/service-worker.js", import.meta.url),
+    "utf8"
+  )
+
+  const start = source.indexOf('case "submit_agent_turn_once"')
+  const end = source.indexOf('case "submit_composer_once"', start)
+  assert.ok(start >= 0 && end > start)
+
+  const submit = source.slice(start, end)
+  const armedIndex = submit.indexOf("await saveAgentTurnReceipt(armed)")
+  const clickIndex = submit.indexOf("expression: buildSubmitButtonProbeExpression()")
+
+  assert.ok(armedIndex >= 0)
+  assert.ok(clickIndex > armedIndex, "agent turn receipt must be durable before Send is attempted")
+
+  assert.ok(submit.includes('["bound", "armed", "uncertain"].includes(existing.status)'))
+  assert.ok(submit.includes("no_resubmit: true"))
+  assert.ok(submit.includes("expected_conversation_id"))
+  assert.ok(submit.includes("currentBinding.conversation_id !== expectedConversationId"))
+  assert.ok(submit.includes("if (!clickAttempted) throw error"))
+  assert.ok(submit.includes('status: "uncertain"'))
+  assert.ok(submit.includes("await saveAgentTurnReceipt(uncertain)"))
+
+  const forbidden = [
+    'key: "Enter"',
+    'code: "Enter"',
+    "requestSubmit",
+    ".submit(",
+  ]
+  for (const token of forbidden) {
+    assert.equal(submit.includes(token), false, `agent turn submit must not contain ${token}`)
+  }
+})
