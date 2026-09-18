@@ -1,0 +1,250 @@
+import { randomBytes, randomUUID } from "node:crypto"
+import { chmod, mkdir, readFile, writeFile } from "node:fs/promises"
+import { createServer } from "node:http"
+import { dirname, join } from "node:path"
+import { fileURLToPath } from "node:url"
+
+const repoRoot = fileURLToPath(new URL("../", import.meta.url))
+const DEFAULT_HOST = "127.0.0.1"
+const DEFAULT_PORT = Number.parseInt(process.env.BEL01_BRIDGE_PORT ?? "9233", 10)
+const DEFAULT_TOKEN_PATH = join(repoRoot, ".shellby", "chrome-extension-bridge.token")
+const MAX_BODY_BYTES = 2 * 1024 * 1024
+const MAX_EVENTS = 500
+const LONG_POLL_MS = 20_000
+
+export async function loadOrCreateBridgeToken(path = DEFAULT_TOKEN_PATH) {
+  try {
+    const existing = (await readFile(path, "utf8")).trim()
+    if (existing) return existing
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error
+  }
+
+  await mkdir(dirname(path), { recursive: true })
+  const token = randomBytes(32).toString("hex")
+  await writeFile(path, `${token}\n`, { mode: 0o600, flag: "wx" }).catch(async (error) => {
+    if (error?.code !== "EEXIST") throw error
+  })
+  await chmod(path, 0o600)
+  return (await readFile(path, "utf8")).trim()
+}
+
+export function createBridgeServer({ host = DEFAULT_HOST, port = DEFAULT_PORT, token }) {
+  if (!token) throw new Error("BEL-01 Chrome bridge requires an authentication token.")
+
+  const commands = []
+  const results = new Map()
+  const events = []
+  const waiters = new Set()
+  let extensionLastSeenAt = null
+  let extensionClientId = null
+
+  const server = createServer(async (req, res) => {
+    setCors(res)
+
+    if (req.method === "OPTIONS") {
+      res.writeHead(204).end()
+      return
+    }
+
+    const url = new URL(req.url ?? "/", `http://${req.headers.host ?? `${host}:${port}`}`)
+
+    try {
+      if (req.method === "GET" && url.pathname === "/health") {
+        sendJson(res, 200, {
+          ok: true,
+          service: "bel-01-chrome-extension-bridge",
+          extension_connected: extensionLastSeenAt !== null && Date.now() - extensionLastSeenAt < 45_000,
+          extension_client_id: extensionClientId,
+          queued_commands: commands.length,
+          pending_results: results.size,
+          event_count: events.length,
+        })
+        return
+      }
+
+      if (!authorized(req, token)) {
+        sendJson(res, 401, { error: "unauthorized" })
+        return
+      }
+
+      if (req.method === "POST" && url.pathname === "/operator/command") {
+        const body = await readJson(req)
+        if (!body || typeof body.type !== "string" || body.type.length === 0) {
+          sendJson(res, 400, { error: "command type is required" })
+          return
+        }
+
+        const command = {
+          id: randomUUID(),
+          type: body.type,
+          payload: body.payload && typeof body.payload === "object" ? body.payload : {},
+          created_at: new Date().toISOString(),
+        }
+        commands.push(command)
+        wakeOneWaiter()
+        sendJson(res, 202, { id: command.id })
+        return
+      }
+
+      const resultMatch = req.method === "GET" ? url.pathname.match(/^\/operator\/result\/([^/]+)$/) : null
+      if (resultMatch) {
+        const id = decodeURIComponent(resultMatch[1])
+        const result = results.get(id)
+        if (!result) {
+          sendJson(res, 202, { id, status: "pending" })
+          return
+        }
+        results.delete(id)
+        sendJson(res, 200, result)
+        return
+      }
+
+      if (req.method === "GET" && url.pathname === "/operator/events") {
+        sendJson(res, 200, { events })
+        return
+      }
+
+      if (req.method === "GET" && url.pathname === "/extension/next") {
+        extensionLastSeenAt = Date.now()
+        extensionClientId = url.searchParams.get("client_id") || "unknown"
+
+        if (commands.length === 0) await waitForCommand()
+        const command = commands.shift()
+
+        if (!command) {
+          res.writeHead(204).end()
+          return
+        }
+
+        sendJson(res, 200, command)
+        return
+      }
+
+      if (req.method === "POST" && url.pathname === "/extension/result") {
+        extensionLastSeenAt = Date.now()
+        const body = await readJson(req)
+        if (!body || typeof body.id !== "string") {
+          sendJson(res, 400, { error: "result id is required" })
+          return
+        }
+        results.set(body.id, {
+          id: body.id,
+          ok: body.ok === true,
+          result: body.result,
+          error: typeof body.error === "string" ? body.error : undefined,
+          received_at: new Date().toISOString(),
+        })
+        sendJson(res, 202, { accepted: true })
+        return
+      }
+
+      if (req.method === "POST" && url.pathname === "/extension/event") {
+        extensionLastSeenAt = Date.now()
+        const body = await readJson(req)
+        events.push({
+          ...body,
+          received_at: new Date().toISOString(),
+        })
+        if (events.length > MAX_EVENTS) events.splice(0, events.length - MAX_EVENTS)
+        sendJson(res, 202, { accepted: true })
+        return
+      }
+
+      sendJson(res, 404, { error: "not_found" })
+    } catch (error) {
+      sendJson(res, 500, { error: error instanceof Error ? error.message : String(error) })
+    }
+  })
+
+  function waitForCommand() {
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        waiters.delete(done)
+        resolve()
+      }, LONG_POLL_MS)
+      const done = () => {
+        clearTimeout(timer)
+        waiters.delete(done)
+        resolve()
+      }
+      waiters.add(done)
+    })
+  }
+
+  function wakeOneWaiter() {
+    const waiter = waiters.values().next().value
+    waiter?.()
+  }
+
+  return {
+    server,
+    async start() {
+      await new Promise((resolve, reject) => {
+        server.once("error", reject)
+        server.listen(port, host, () => {
+          server.off("error", reject)
+          resolve()
+        })
+      })
+      const address = server.address()
+      if (!address || typeof address === "string") throw new Error("Bridge did not bind to a TCP address.")
+      return { host: address.address, port: address.port, url: `http://${address.address}:${address.port}` }
+    },
+    async close() {
+      for (const waiter of [...waiters]) waiter()
+      await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())))
+    },
+  }
+}
+
+function authorized(req, token) {
+  return req.headers.authorization === `Bearer ${token}`
+}
+
+function setCors(res) {
+  res.setHeader("Access-Control-Allow-Origin", "*")
+  res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type")
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+  res.setHeader("Cache-Control", "no-store")
+}
+
+function sendJson(res, status, value) {
+  const body = JSON.stringify(value)
+  res.writeHead(status, {
+    "Content-Type": "application/json; charset=utf-8",
+    "Content-Length": Buffer.byteLength(body),
+  })
+  res.end(body)
+}
+
+async function readJson(req) {
+  const chunks = []
+  let size = 0
+  for await (const chunk of req) {
+    size += chunk.length
+    if (size > MAX_BODY_BYTES) throw new Error("request body too large")
+    chunks.push(chunk)
+  }
+  if (chunks.length === 0) return {}
+  return JSON.parse(Buffer.concat(chunks).toString("utf8"))
+}
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  const token = await loadOrCreateBridgeToken()
+  const bridge = createBridgeServer({ token })
+  const bound = await bridge.start()
+
+  console.log("BEL-01 Chrome extension bridge: ready")
+  console.log(`URL: ${bound.url}`)
+  console.log(`Token: ${token}`)
+  console.log("The bridge listens on Windows/WSL loopback only.")
+  console.log("Press Ctrl+C to stop.")
+
+  const stop = async () => {
+    await bridge.close().catch(() => undefined)
+    process.exit(0)
+  }
+  process.once("SIGINT", stop)
+  process.once("SIGTERM", stop)
+}
