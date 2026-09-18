@@ -142,6 +142,20 @@ test("unfinished assistant response remains running", () => {
   })
 })
 
+test("assistant without finished_successfully remains running", () => {
+  const result = analyzeConversationPayload(
+    conversationPayload({ assistantStatus: "in_progress" }),
+    CONVERSATION_ID,
+    PROMPT
+  )
+
+  assert.deepEqual(result, {
+    status: "running",
+    user_turn_count: 1,
+    conversation_id: CONVERSATION_ID,
+  })
+})
+
 test("observer refuses prompt mismatch and multiple user turns", () => {
   const promptMismatch = analyzeConversationPayload(
     conversationPayload({ prompt: "different prompt" }),
