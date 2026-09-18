@@ -546,7 +546,13 @@ BEL-01B.2b response completion/reconstruction remains out of scope until B.2a is
 - human visual inspection confirms exactly one user prompt is present in the resulting conversation: PASS
 - human visual inspection confirms an assistant response is present beneath that user prompt: PASS
 
-Still to record explicitly before formal BEL-01B.2a closure:
-- same submission_id replay returns the existing bound receipt without another Send;
-- a second first-turn submission identity on the same child tab is refused;
-- `recover_prompt_submission` returns the bound receipt without resubmitting.
+- same submission_id replay returns the existing bound receipt with unchanged armed/clicked/bound timestamps and no additional Send: PASS
+- a second first-turn submission identity on the same child tab is refused: PASS
+- `recover_prompt_submission` returns the existing bound receipt without resubmitting: PASS
+- human visual inspection after guard testing still confirms exactly one user prompt exists: PASS
+
+BEL-01B.2a STATUS: COMPLETE
+
+Next milestone: BEL-01B.2b — response observation and reconstruction. The executor must bind only to
+the accepted submitted turn, observe completion without DOM scraping or duplicate sends, and return a
+bounded assistant-response receipt.
