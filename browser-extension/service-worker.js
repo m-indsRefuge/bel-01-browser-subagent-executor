@@ -464,6 +464,163 @@ async function handleCommand(command) {
       }
     }
 
+    case "submit_agent_turn_once": {
+      const tab = await requireChatGptTab(payload.tab_id)
+      if (!attachedTabs.has(tab.id)) {
+        throw new Error(`Tab ${tab.id} is not attached. Run attach first.`)
+      }
+
+      const turnId = validateSubmissionId(payload.turn_id)
+      const text = validateComposerDraft(payload.text)
+      const promptSha256 = await sha256Hex(text)
+      const expectedConversationId =
+        typeof payload.expected_conversation_id === "string" &&
+        payload.expected_conversation_id.length > 0
+          ? payload.expected_conversation_id
+          : undefined
+      const existing = await loadAgentTurnReceipt(turnId)
+
+      if (existing) {
+        if (existing.tab_id !== tab.id || existing.prompt_sha256 !== promptSha256) {
+          throw new Error(
+            `turn_id ${turnId} is already bound to a different tab or prompt.`
+          )
+        }
+        if (existing.status === "bound") {
+          return publicAgentTurnReceipt(existing)
+        }
+        throw new Error(
+          `turn_id ${turnId} is already ${existing.status}; refusing duplicate submission.`
+        )
+      }
+
+      const currentBinding = extractConversationBinding(tab.url)
+      if (expectedConversationId) {
+        if (!currentBinding || currentBinding.conversation_id !== expectedConversationId) {
+          throw new Error(
+            "The child tab is not bound to the expected conversation for this turn."
+          )
+        }
+      } else if (currentBinding) {
+        throw new Error(
+          "A first agent turn requires an unbound ChatGPT child tab."
+        )
+      }
+
+      const comparison = await evaluateDraftComparison(tab.id, text)
+      if (!comparison.exact_match) {
+        throw new Error(
+          "Agent turn submission requires the composer to exactly match the expected prompt."
+        )
+      }
+
+      const armed = {
+        turn_id: turnId,
+        status: "armed",
+        tab_id: tab.id,
+        prompt_sha256: promptSha256,
+        expected_conversation_id: expectedConversationId,
+        armed_at: new Date().toISOString(),
+      }
+      await saveAgentTurnReceipt(armed)
+
+      let clickAttempted = false
+      try {
+        const evaluation = await chrome.debugger.sendCommand(
+          { tabId: tab.id },
+          "Runtime.evaluate",
+          {
+            expression: buildSubmitButtonProbeExpression(),
+            returnByValue: true,
+            awaitPromise: false,
+            userGesture: true,
+          }
+        )
+
+        if (evaluation.exceptionDetails) {
+          const message =
+            evaluation.exceptionDetails.exception?.description ??
+            evaluation.exceptionDetails.text ??
+            "Agent turn submission failed inside the page runtime."
+          throw new Error(message)
+        }
+
+        const sendTarget = evaluation.result?.value
+        if (
+          !sendTarget?.click_ready ||
+          !Number.isFinite(sendTarget.x) ||
+          !Number.isFinite(sendTarget.y)
+        ) {
+          throw new Error("Agent turn did not receive a valid Send-button target.")
+        }
+
+        clickAttempted = true
+        await chrome.debugger.sendCommand(
+          { tabId: tab.id },
+          "Input.dispatchMouseEvent",
+          {
+            type: "mousePressed",
+            x: sendTarget.x,
+            y: sendTarget.y,
+            button: "left",
+            clickCount: 1,
+          }
+        )
+        await chrome.debugger.sendCommand(
+          { tabId: tab.id },
+          "Input.dispatchMouseEvent",
+          {
+            type: "mouseReleased",
+            x: sendTarget.x,
+            y: sendTarget.y,
+            button: "left",
+            clickCount: 1,
+          }
+        )
+
+        let binding = currentBinding
+        if (!binding) {
+          binding = await waitForConversationBinding(tab.id, SUBMISSION_BIND_TIMEOUT_MS)
+        }
+        if (!binding) {
+          throw new Error(
+            "Agent turn may have been submitted, but conversation binding is uncertain. Do not retry."
+          )
+        }
+        if (
+          expectedConversationId &&
+          binding.conversation_id !== expectedConversationId
+        ) {
+          throw new Error(
+            "Agent turn bound to an unexpected conversation after submission."
+          )
+        }
+
+        const bound = {
+          ...armed,
+          status: "bound",
+          clicked_at: new Date().toISOString(),
+          conversation_id: binding.conversation_id,
+          conversation_url: binding.conversation_url,
+          bound_at: new Date().toISOString(),
+        }
+        await saveAgentTurnReceipt(bound)
+        return publicAgentTurnReceipt(bound)
+      } catch (error) {
+        const current = (await loadAgentTurnReceipt(turnId)) ?? armed
+        if (current.status !== "bound") {
+          await saveAgentTurnReceipt({
+            ...current,
+            status: "uncertain",
+            click_attempted: clickAttempted,
+            uncertain_at: new Date().toISOString(),
+            last_error: error instanceof Error ? error.message : String(error),
+          })
+        }
+        throw error
+      }
+    }
+
     case "submit_composer_once": {
       const submissionId = validateSubmissionId(payload.submission_id)
       const text = validateComposerDraft(payload.text)
@@ -847,6 +1004,55 @@ async function sha256Hex(text) {
   const bytes = new TextEncoder().encode(text)
   const digest = await crypto.subtle.digest("SHA-256", bytes)
   return [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, "0")).join("")
+}
+
+async function loadAgentTurnReceipt(turnId) {
+  const key = `bel01_agent_turn:${validateSubmissionId(turnId)}`
+  const values = await chrome.storage.local.get(key)
+  if (!Object.prototype.hasOwnProperty.call(values, key)) return undefined
+
+  const receipt = values[key]
+  if (
+    !receipt ||
+    typeof receipt !== "object" ||
+    receipt.turn_id !== turnId ||
+    !Number.isInteger(receipt.tab_id) ||
+    typeof receipt.prompt_sha256 !== "string" ||
+    typeof receipt.status !== "string"
+  ) {
+    throw new Error(`Agent turn ledger entry ${turnId} is invalid; refusing fail-open recovery.`)
+  }
+  return receipt
+}
+
+async function saveAgentTurnReceipt(receipt) {
+  const turnId = validateSubmissionId(receipt?.turn_id)
+  if (!Number.isInteger(receipt?.tab_id)) {
+    throw new Error("Agent turn receipt requires an integer tab_id.")
+  }
+  if (typeof receipt?.prompt_sha256 !== "string" || receipt.prompt_sha256.length !== 64) {
+    throw new Error("Agent turn receipt requires a SHA-256 prompt fingerprint.")
+  }
+  if (!["armed", "bound", "uncertain"].includes(receipt?.status)) {
+    throw new Error(`Invalid agent turn receipt status: ${String(receipt?.status)}`)
+  }
+
+  const key = `bel01_agent_turn:${turnId}`
+  await chrome.storage.local.set({ [key]: receipt })
+}
+
+function publicAgentTurnReceipt(receipt) {
+  return {
+    turn_id: receipt.turn_id,
+    status: receipt.status,
+    tab_id: receipt.tab_id,
+    conversation_id: receipt.conversation_id,
+    conversation_url: receipt.conversation_url,
+    armed_at: receipt.armed_at,
+    clicked_at: receipt.clicked_at,
+    bound_at: receipt.bound_at,
+    at_most_once: true,
+  }
 }
 
 async function loadSubmissionReceipt(submissionId) {
