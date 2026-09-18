@@ -390,8 +390,11 @@ Risk:
 BEL-01 could click the wrong control after a ChatGPT UI change.
 
 Current control:
-`submit_composer_once` refuses unless exactly one visible enabled Send candidate exists. It uses
-only the fixed selectors in browser-extension/submission.js and has no Enter fallback.
+`submit_composer_once` refuses unless exactly one visible enabled Send candidate exists and the
+candidate passes a center-point `document.elementFromPoint` hit test. The DOM probe returns only
+coordinates/metadata; the actual click is delivered through CDP `Input.dispatchMouseEvent`.
+Only the fixed selectors in browser-extension/submission.js are allowed and there is no Enter
+fallback.
 
 Safe recovery:
 Inspect the child tab and update selector tests deliberately. Do not broaden the selector to generic
