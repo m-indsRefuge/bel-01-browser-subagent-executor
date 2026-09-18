@@ -5,7 +5,7 @@ import test from "node:test"
 import {
   SEND_BUTTON_SELECTORS,
   SUBMISSION_BIND_TIMEOUT_MS,
-  buildSubmitButtonClickExpression,
+  buildSubmitButtonProbeExpression,
   extractConversationBinding,
   submissionStorageKey,
   validateSubmissionId,
@@ -39,7 +39,7 @@ test("conversation binding accepts only ChatGPT conversation URLs", () => {
 })
 
 test("submission click expression is a single bounded Send-button action", () => {
-  const expression = buildSubmitButtonClickExpression()
+  const expression = buildSubmitButtonProbeExpression()
 
   assert.deepEqual(SEND_BUTTON_SELECTORS, [
     'button[data-testid="send-button"]',
@@ -48,9 +48,9 @@ test("submission click expression is a single bounded Send-button action", () =>
   ])
   assert.equal(SUBMISSION_BIND_TIMEOUT_MS, 15_000)
   assert.ok(expression.includes("candidates.length !== 1"))
-  assert.ok(expression.includes("element.click()"))
-  assert.ok(expression.includes("clicked: true"))
-  assert.ok(expression.includes("submitted: true"))
+  assert.ok(expression.includes("click_ready: true"))
+  assert.ok(expression.includes("x: rect.left + rect.width / 2"))
+  assert.ok(expression.includes("submitted: false"))
 
   const forbidden = [
     "KeyboardEvent",
@@ -74,7 +74,7 @@ test("service worker persists armed receipt before Send-button click", async () 
   )
 
   const armedIndex = source.indexOf("await saveSubmissionReceipt(armed)")
-  const clickIndex = source.indexOf("expression: buildSubmitButtonClickExpression()")
+  const clickIndex = source.indexOf("expression: buildSubmitButtonProbeExpression()")
 
   assert.ok(armedIndex >= 0)
   assert.ok(clickIndex >= 0)
@@ -86,6 +86,9 @@ test("service worker persists armed receipt before Send-button click", async () 
   assert.ok(source.includes("refusing a second submission identity"))
   assert.ok(source.includes("findSubmissionReceiptByIdentity"))
   assert.ok(source.includes("Use recover_prompt_submission instead."))
+  assert.ok(source.includes('"Input.dispatchMouseEvent"'))
+  assert.ok(source.includes('type: "mousePressed"'))
+  assert.ok(source.includes('type: "mouseReleased"'))
   assert.ok(source.includes("waitForConversationBinding"))
   assert.ok(source.includes('status: "submitted_unbound"'))
   assert.ok(source.includes("const submittedReceipt = {"))
@@ -117,7 +120,7 @@ test("recovery path cannot resend", async () => {
 
   const recovery = source.slice(start, end)
   const forbidden = [
-    "buildSubmitButtonClickExpression",
+    "buildSubmitButtonProbeExpression",
     "Input.insertText",
     'key: "Enter"',
     "requestSubmit",
