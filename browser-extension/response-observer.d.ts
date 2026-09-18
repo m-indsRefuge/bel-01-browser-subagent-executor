@@ -25,4 +25,6 @@ export function analyzeConversationPayload(
   response_characters?: number
   response_total_characters?: number
   response_truncated?: boolean
+  candidate_count?: number
+  payload_shape?: unknown
 }
