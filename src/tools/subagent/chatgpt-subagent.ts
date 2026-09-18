@@ -743,7 +743,6 @@ export function createChatGptSubagentService(): ChatGptSubagentService {
   }
 
   function bindConversation(parentAgent: AgentIdentity | undefined, agent: BrowserAgentState, conversationId: string): void {
-    if (!agent.memory) return
     const pageUrl = agent.page && !agent.page.isClosed() ? agent.page.url() : undefined
     if (pageUrl && extractConversationId(pageUrl) === conversationId) agent.conversationUrl = pageUrl
     else if (extractConversationId(agent.conversationUrl ?? "") !== conversationId) {
@@ -762,7 +761,7 @@ export function createChatGptSubagentService(): ChatGptSubagentService {
   }
 
   function captureConversationUrlFromPage(agent: BrowserAgentState): void {
-    if (!agent.memory || agent.conversationUrl || !agent.page || agent.page.isClosed()) return
+    if (agent.conversationUrl || !agent.page || agent.page.isClosed()) return
     const pageUrl = agent.page.url()
     if (extractConversationId(pageUrl)) agent.conversationUrl = pageUrl
   }
