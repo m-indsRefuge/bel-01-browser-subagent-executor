@@ -49,8 +49,9 @@ test("submission click expression is a single bounded Send-button action", () =>
   assert.equal(SUBMISSION_BIND_TIMEOUT_MS, 15_000)
   assert.ok(expression.includes("candidates.length !== 1"))
   assert.ok(expression.includes("click_ready: true"))
-  assert.ok(expression.includes("x: rect.left + rect.width / 2"))
+  assert.ok(expression.includes("document.elementFromPoint(x, y)"))
   assert.ok(expression.includes("submitted: false"))
+  assert.equal(expression.includes("element.click()"), false)
 
   const forbidden = [
     "KeyboardEvent",
@@ -121,6 +122,7 @@ test("recovery path cannot resend", async () => {
   const recovery = source.slice(start, end)
   const forbidden = [
     "buildSubmitButtonProbeExpression",
+    "Input.dispatchMouseEvent",
     "Input.insertText",
     'key: "Enter"',
     "requestSubmit",
@@ -167,4 +169,27 @@ test("bound replay is resolved before live tab validation", async () => {
   assert.ok(loadIndex >= 0)
   assert.ok(boundReturnIndex > loadIndex)
   assert.ok(liveTabIndex > boundReturnIndex)
+})
+
+
+test("submission ledger never persists prompt text or exposes its hash", async () => {
+  const source = await readFile(
+    new URL("../browser-extension/service-worker.js", import.meta.url),
+    "utf8"
+  )
+
+  const armedStart = source.indexOf("const armed = {")
+  const armedEnd = source.indexOf("await saveSubmissionReceipt(armed)", armedStart)
+  assert.ok(armedStart >= 0 && armedEnd > armedStart)
+
+  const armedBlock = source.slice(armedStart, armedEnd)
+  assert.ok(armedBlock.includes("prompt_sha256: promptSha256"))
+  assert.equal(armedBlock.includes("text:"), false)
+
+  const publicStart = source.indexOf("function publicSubmissionReceipt")
+  const publicEnd = source.indexOf("async function waitForConversationBinding", publicStart)
+  assert.ok(publicStart >= 0 && publicEnd > publicStart)
+
+  const publicBlock = source.slice(publicStart, publicEnd)
+  assert.equal(publicBlock.includes("prompt_sha256"), false)
 })
