@@ -28,6 +28,37 @@ export function isConversationPayloadUrl(value, conversationId) {
   }
 }
 
+function describePayloadShape(value, depth = 0) {
+  if (depth > 2) return "object"
+
+  if (Array.isArray(value)) {
+    return {
+      type: "array",
+      length: value.length,
+      sample:
+        value.length > 0
+          ? describePayloadShape(value[0], depth + 1)
+          : undefined,
+    }
+  }
+
+  if (!value || typeof value !== "object") {
+    return typeof value
+  }
+
+  const entries = Object.entries(value).slice(0, 32)
+  return {
+    type: "object",
+    keys: entries.map(([key]) => key),
+    children: Object.fromEntries(
+      entries
+        .filter(([, nested]) => nested && typeof nested === "object")
+        .slice(0, 12)
+        .map(([key, nested]) => [key, describePayloadShape(nested, depth + 1)])
+    ),
+  }
+}
+
 export function analyzeConversationPayload(
   payload,
   conversationId,
@@ -77,17 +108,50 @@ export function analyzeConversationPayload(
     }
   }
 
-  const root = asRecord(payload)
-  const mapping = asRecord(root?.mapping)
-  const currentNode = typeof root?.current_node === "string" ? root.current_node : undefined
+  const candidates = []
+  const visited = new Set()
 
-  if (!mapping || !currentNode) {
-    return {
-      status: "protocol_error",
-      reason: "conversation payload is missing mapping/current_node",
-      conversation_id: conversationId,
+  const visit = (value, path = "$", depth = 0) => {
+    if (!value || typeof value !== "object" || visited.has(value) || depth > 4) return
+    visited.add(value)
+
+    if (Array.isArray(value)) {
+      for (let index = 0; index < Math.min(value.length, 16); index += 1) {
+        visit(value[index], path + "[" + index + "]", depth + 1)
+      }
+      return
+    }
+
+    const record = value
+    const mapping = asRecord(record.mapping)
+    const currentNode =
+      typeof record.current_node === "string" ? record.current_node : undefined
+
+    if (mapping && currentNode) {
+      candidates.push({ root: record, mapping, currentNode, path })
+    }
+
+    for (const [key, nested] of Object.entries(record)) {
+      visit(nested, path + "." + key, depth + 1)
     }
   }
+
+  visit(payload)
+
+  if (candidates.length !== 1) {
+    return {
+      status: "protocol_error",
+      reason:
+        candidates.length === 0
+          ? "conversation payload contains no unique mapping/current_node object"
+          : "conversation payload contains multiple mapping/current_node objects",
+      conversation_id: conversationId,
+      candidate_count: candidates.length,
+      payload_shape: describePayloadShape(payload),
+    }
+  }
+
+  const { mapping, currentNode } = candidates[0]
 
   const nodes = []
   const seen = new Set()
