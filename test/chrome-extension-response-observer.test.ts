@@ -4,9 +4,10 @@ import test from "node:test"
 
 import {
   MAX_RESPONSE_CHARACTERS,
-  RESPONSE_POLL_INTERVAL_MS,
+  RESPONSE_CAPTURE_TIMEOUT_MS,
   RESPONSE_POLL_MAX_WAIT_MS,
-  buildConversationSnapshotExpression,
+  analyzeConversationPayload,
+  isConversationPayloadUrl,
   validateResponseWaitMs,
 } from "../browser-extension/response-observer.js"
 
@@ -66,54 +67,54 @@ function conversationPayload({
   }
 }
 
-async function evaluateWithPayload(
-  payload: unknown,
-  expectedPrompt = PROMPT,
-  maxResponseCharacters?: number
-) {
-  const expression = buildConversationSnapshotExpression(
-    CONVERSATION_ID,
-    expectedPrompt,
-    maxResponseCharacters
-  )
-  const originalFetch = globalThis.fetch
-
-  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    assert.equal(
-      String(input),
-      `/backend-api/conversations/${encodeURIComponent(CONVERSATION_ID)}`
-    )
-    assert.equal(init?.method, "GET")
-    assert.equal(init?.credentials, "include")
-    return {
-      ok: true,
-      status: 200,
-      async json() {
-        return payload
-      },
-    } as Response
-  }) as typeof fetch
-
-  try {
-    return await (0, eval)(expression)
-  } finally {
-    globalThis.fetch = originalFetch
-  }
-}
-
-test("response wait bounds are explicit", () => {
+test("response wait and capture bounds are explicit", () => {
   assert.equal(validateResponseWaitMs(undefined), 0)
   assert.equal(validateResponseWaitMs(0), 0)
   assert.equal(validateResponseWaitMs(RESPONSE_POLL_MAX_WAIT_MS), RESPONSE_POLL_MAX_WAIT_MS)
   assert.throws(() => validateResponseWaitMs(-1), /wait_ms/)
   assert.throws(() => validateResponseWaitMs(RESPONSE_POLL_MAX_WAIT_MS + 1), /wait_ms/)
   assert.throws(() => validateResponseWaitMs(1.5), /wait_ms/)
-  assert.equal(RESPONSE_POLL_INTERVAL_MS, 250)
+  assert.equal(RESPONSE_CAPTURE_TIMEOUT_MS, 10_000)
   assert.equal(MAX_RESPONSE_CHARACTERS, 128_000)
 })
 
-test("completed first-turn conversation returns only the bound assistant response", async () => {
-  const result = await evaluateWithPayload(conversationPayload())
+test("conversation payload URL matcher is exact and ChatGPT-only", () => {
+  assert.equal(
+    isConversationPayloadUrl(
+      `https://chatgpt.com/backend-api/conversations/${CONVERSATION_ID}`,
+      CONVERSATION_ID
+    ),
+    true
+  )
+  assert.equal(
+    isConversationPayloadUrl(
+      `https://chatgpt.com/backend-api/conversations/${CONVERSATION_ID}?x=1`,
+      CONVERSATION_ID
+    ),
+    true
+  )
+  assert.equal(
+    isConversationPayloadUrl(
+      `https://example.com/backend-api/conversations/${CONVERSATION_ID}`,
+      CONVERSATION_ID
+    ),
+    false
+  )
+  assert.equal(
+    isConversationPayloadUrl(
+      "https://chatgpt.com/backend-api/conversations/other",
+      CONVERSATION_ID
+    ),
+    false
+  )
+})
+
+test("completed first-turn payload returns only the bound assistant response", () => {
+  const result = analyzeConversationPayload(
+    conversationPayload(),
+    CONVERSATION_ID,
+    PROMPT
+  )
 
   assert.deepEqual(result, {
     status: "completed",
@@ -127,9 +128,11 @@ test("completed first-turn conversation returns only the bound assistant respons
   })
 })
 
-test("unfinished assistant response remains running", async () => {
-  const result = await evaluateWithPayload(
-    conversationPayload({ assistantEndTurn: false, assistantText: "partial" })
+test("unfinished assistant response remains running", () => {
+  const result = analyzeConversationPayload(
+    conversationPayload({ assistantEndTurn: false, assistantText: "partial" }),
+    CONVERSATION_ID,
+    PROMPT
   )
 
   assert.deepEqual(result, {
@@ -139,24 +142,29 @@ test("unfinished assistant response remains running", async () => {
   })
 })
 
-test("observer refuses prompt mismatch and multiple user turns", async () => {
-  const promptMismatch = await evaluateWithPayload(
-    conversationPayload({ prompt: "different prompt" })
+test("observer refuses prompt mismatch and multiple user turns", () => {
+  const promptMismatch = analyzeConversationPayload(
+    conversationPayload({ prompt: "different prompt" }),
+    CONVERSATION_ID,
+    PROMPT
   )
   assert.equal(promptMismatch.status, "binding_mismatch")
   assert.equal(promptMismatch.reason, "prompt_mismatch")
 
-  const multipleUsers = await evaluateWithPayload(
-    conversationPayload({ extraUser: true })
+  const multipleUsers = analyzeConversationPayload(
+    conversationPayload({ extraUser: true }),
+    CONVERSATION_ID,
+    PROMPT
   )
   assert.equal(multipleUsers.status, "binding_mismatch")
   assert.equal(multipleUsers.reason, "user_turn_count")
   assert.equal(multipleUsers.user_turn_count, 2)
 })
 
-test("oversized responses are explicitly bounded and marked truncated", async () => {
-  const result = await evaluateWithPayload(
+test("oversized responses are explicitly bounded and marked truncated", () => {
+  const result = analyzeConversationPayload(
     conversationPayload({ assistantText: "abcdefghij" }),
+    CONVERSATION_ID,
     PROMPT,
     4
   )
@@ -168,28 +176,36 @@ test("oversized responses are explicitly bounded and marked truncated", async ()
   assert.equal(result.response_truncated, true)
 })
 
-test("observer expression contains no browser mutation or submission path", () => {
-  const expression = buildConversationSnapshotExpression(CONVERSATION_ID, PROMPT)
+test("protocol shape failure is explicit", () => {
+  const result = analyzeConversationPayload(
+    { unexpected: true },
+    CONVERSATION_ID,
+    PROMPT
+  )
 
-  assert.ok(expression.includes("/backend-api/conversations/"))
-  assert.ok(expression.includes('credentials: "include"'))
-  assert.ok(expression.includes('status: "binding_mismatch"'))
-  assert.ok(expression.includes('status: "completed"'))
+  assert.equal(result.status, "protocol_error")
+  assert.equal(result.reason, "conversation payload is missing mapping/current_node")
+})
 
-  const forbidden = [
-    "document.querySelector",
-    "element.click",
-    "dispatchEvent",
-    "KeyboardEvent",
-    "Input.insertText",
-    "Input.dispatchMouseEvent",
-    "requestSubmit",
-    ".submit(",
-  ]
+test("service worker captures ChatGPT-owned payload by CDP reload, not synthetic fetch", async () => {
+  const source = await readFile(
+    new URL("../browser-extension/service-worker.js", import.meta.url),
+    "utf8"
+  )
 
-  for (const token of forbidden) {
-    assert.equal(expression.includes(token), false, `observer expression must not contain ${token}`)
-  }
+  assert.ok(source.includes("captureConversationPayloadViaReload"))
+  assert.ok(source.includes('"Page.reload"'))
+  assert.ok(source.includes('"Network.responseReceived"'))
+  assert.ok(source.includes('"Network.loadingFinished"'))
+  assert.ok(source.includes('"Network.getResponseBody"'))
+  assert.ok(source.includes("isConversationPayloadUrl"))
+  assert.ok(source.includes("analyzeConversationPayload"))
+
+  assert.equal(
+    source.includes('fetch("/backend-api/conversations/'),
+    false,
+    "observer must not synthesize a conversation API request"
+  )
 })
 
 test("service worker observer is receipt-bound and structurally non-submitting", async () => {
@@ -206,7 +222,8 @@ test("service worker observer is receipt-bound and structurally non-submitting",
   assert.ok(observer.includes('receipt.status !== "bound"'))
   assert.ok(observer.includes("receipt.prompt_sha256 !== promptSha256"))
   assert.ok(observer.includes("currentBinding.conversation_id !== receipt.conversation_id"))
-  assert.ok(observer.includes("evaluateResponseSnapshot"))
+  assert.ok(observer.includes("captureConversationPayloadViaReload"))
+  assert.ok(observer.includes("analyzeConversationPayload"))
   assert.ok(observer.includes('status: "completed"'))
   assert.ok(observer.includes('status: "running"'))
 
