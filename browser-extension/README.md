@@ -13,8 +13,10 @@ It is intentionally narrower than the final BSAP v2 browser executor. The extens
 - attaches `chrome.debugger` only to ChatGPT tabs;
 - forwards only sanitized CDP metadata during BEL-01B.
 
-It does **not** type into ChatGPT, submit prompts, read conversation text, expose cookies, forward request headers,
-or provide arbitrary browser control in this milestone.
+BEL-01B.1 adds one explicit draft-only mutation capability. It may write or clear an unsent draft in
+an empty, uniquely identified ChatGPT composer. It does **not** submit prompts, read conversation
+text, overwrite an existing draft, expose cookies, forward request headers, or provide arbitrary
+browser control.
 
 ## 1. Start the bridge in WSL
 
@@ -99,6 +101,28 @@ node scripts/chrome-extension-client.mjs inspect_composer '{"tab_id":123}'
 The composer inspection is read-only. It returns structural metadata such as tag, role,
 placeholder, data-testid, visibility, and dimensions. It does not read composer contents or
 conversation text and does not mutate the page.
+
+## 5. BEL-01B.1 draft-only canary
+
+Use a fresh isolated tab. After `attach` and `inspect_composer` confirm exactly one visible editable
+composer, write a harmless canary without submitting it:
+
+```bash
+node scripts/chrome-extension-client.mjs write_composer_draft '{"tab_id":123,"text":"BEL-01B.1 draft canary — do not submit"}'
+```
+
+A successful result reports metadata only, including `verified: true`, `submitted: false`, and
+the character count. The command refuses a non-empty composer and refuses ambiguous visible editor
+targets.
+
+Visually confirm the text is present and unsent. Then clear it:
+
+```bash
+node scripts/chrome-extension-client.mjs clear_composer_draft '{"tab_id":123}'
+```
+
+Confirm `verified: true`, `submitted: false`, and `composer_empty: true`, then visually confirm
+the composer is empty. Do not press Send during this milestone.
 
 After attachment, reload or navigate that ChatGPT tab and inspect sanitized events:
 
