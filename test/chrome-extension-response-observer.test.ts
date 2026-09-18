@@ -238,7 +238,7 @@ test("completed response text is returned but not persisted in the submission le
   assert.ok(start >= 0 && saveStart > start && saveEnd > saveStart && returnStart > saveEnd)
 
   const persisted = source.slice(saveStart, saveEnd)
-  assert.ok(persisted.includes("assistant_sha256"))
+  assert.ok(persisted.includes("response_sha256"))
   assert.ok(persisted.includes("assistant_characters"))
   assert.equal(persisted.includes("response: responseText"), false)
 
