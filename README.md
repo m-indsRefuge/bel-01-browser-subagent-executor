@@ -198,7 +198,9 @@ path = "/bin/zsh"
 rtk = false
 
 [chatgpt]
+transport = "cdp"
 cdp_endpoint = "http://127.0.0.1:9222"
+extension_bridge_url = "http://127.0.0.1:9233"
 project_url = "https://chatgpt.com/"
 max_delegated_agents = 3
 
@@ -216,6 +218,35 @@ skills = true
 image = true
 computer = false
 ```
+
+### BEL-01 extension-backed subagents
+
+BEL-01 adds a second ChatGPT browser transport while preserving Shellby's existing durable
+subagent lifecycle. The default remains `transport = "cdp"` for upstream compatibility.
+On the WSL/existing-Chrome profile, select:
+
+```toml
+[chatgpt]
+transport = "extension"
+extension_bridge_url = "http://127.0.0.1:9233"
+project_url = "https://chatgpt.com/"
+max_delegated_agents = 3
+```
+
+The extension transport reuses the authenticated Chrome session through the BEL-01 loopback
+bridge. It creates isolated ChatGPT child tabs, arms a live response observer before Send, writes
+the prompt through browser-native input, and submits each Shellby `turn_id` with an at-most-once
+extension ledger. The original CDP transport remains available.
+
+BSAP capability grants are supplied when a new child is created. A child that needs an ungranted
+capability can return a structured permission request; `subagent_result` then reports
+`status=permission_required`. The parent resolves it with `subagent_permission` using
+`decision=grant` or `decision=deny`, and the same durable `agent_id` conversation resumes.
+
+This BEL-01C permission state is a governed control-plane contract. Server-side rejection of
+ungranted child tool calls is not yet implemented because Shellby does not yet bind child browser
+identity to a distinct parent-child MCP session at the tool-registration boundary. See
+`FAILURE_MAP.md` before treating grants as a hard sandbox.
 
 `chatgpt.max_delegated_agents` sets the maximum number of delegated agent IDs per main-agent session, shared by subagents and clones. It defaults to `3`; invalid values warn and fall back to `3`. Set a positive integer to override it. Saved agents and in-flight creations count toward the limit; existing IDs remain reusable even if the limit is lowered. The per-call batch limit remains three. Older configs can omit this field. To override it, add it under `[chatgpt]`, then restart Shellby after changing its value.
 
