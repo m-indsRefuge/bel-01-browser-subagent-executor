@@ -15,21 +15,51 @@ test("persists subagent conversation state across store reopen", () => {
   try {
     const first = createSubagentStore(path)
     assert.ok(first)
-    first.set(mainA, "reviewer", { conversationUrl: "https://chatgpt.com/c/example-a", turnCount: 4, kind: "subagent" })
-    first.set(mainA, "clone-a", { conversationUrl: "https://chatgpt.com/c/clone-a", turnCount: 1, kind: "clone" })
-    first.set(mainB, "reviewer", { conversationUrl: "https://chatgpt.com/c/example-b", turnCount: 2, kind: "subagent" })
+    first.set(mainA, "reviewer", {
+      conversationUrl: "https://chatgpt.com/c/example-a",
+      turnCount: 4,
+      kind: "subagent",
+      grants: ["reasoning", "web"],
+      pendingPermission: {
+        requestId: "reviewer_turn_4_permission",
+        capability: "shell.write",
+        reason: "Need to edit the target file",
+        scope: "src/example.ts",
+      },
+    })
+    first.set(mainA, "clone-a", {
+      conversationUrl: "https://chatgpt.com/c/clone-a",
+      turnCount: 1,
+      kind: "clone",
+      grants: ["reasoning"],
+    })
+    first.set(mainB, "reviewer", {
+      conversationUrl: "https://chatgpt.com/c/example-b",
+      turnCount: 2,
+      kind: "subagent",
+      grants: ["reasoning"],
+    })
     assert.deepEqual(first.list(mainA), [
       {
         agentId: "clone-a",
         conversationUrl: "https://chatgpt.com/c/clone-a",
         turnCount: 1,
         kind: "clone",
+        grants: ["reasoning"],
+        pendingPermission: undefined,
       },
       {
         agentId: "reviewer",
         conversationUrl: "https://chatgpt.com/c/example-a",
         turnCount: 4,
         kind: "subagent",
+        grants: ["reasoning", "web"],
+        pendingPermission: {
+          requestId: "reviewer_turn_4_permission",
+          capability: "shell.write",
+          reason: "Need to edit the target file",
+          scope: "src/example.ts",
+        },
       },
     ])
     first.close()
@@ -40,11 +70,20 @@ test("persists subagent conversation state across store reopen", () => {
       conversationUrl: "https://chatgpt.com/c/example-a",
       turnCount: 4,
       kind: "subagent",
+      grants: ["reasoning", "web"],
+      pendingPermission: {
+        requestId: "reviewer_turn_4_permission",
+        capability: "shell.write",
+        reason: "Need to edit the target file",
+        scope: "src/example.ts",
+      },
     })
     assert.deepEqual(second.get(mainB, "reviewer"), {
       conversationUrl: "https://chatgpt.com/c/example-b",
       turnCount: 2,
       kind: "subagent",
+      grants: ["reasoning"],
+      pendingPermission: undefined,
     })
     assert.deepEqual(
       second.list(mainB).map((agent) => agent.agentId),
