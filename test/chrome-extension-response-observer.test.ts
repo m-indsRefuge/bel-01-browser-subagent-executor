@@ -153,11 +153,10 @@ test("wrapped conversation payload resolves structurally", () => {
 })
 
 test("multiple structural conversation candidates fail closed", () => {
-  const payload = conversationPayload()
   const result = analyzeConversationPayload(
     {
-      first: payload,
-      second: payload,
+      first: conversationPayload(),
+      second: conversationPayload(),
     },
     CONVERSATION_ID,
     PROMPT
