@@ -497,6 +497,35 @@ Do not:
 Do not copy private authentication headers, account identifiers, or tokens out of browser traffic to
 make a synthetic request succeed.
 
+## Captured conversation payload wrapper drift
+Failure symptom:
+The authenticated ChatGPT-owned conversation response is captured successfully with HTTP 200, but
+the parser reports that `mapping` / `current_node` are missing at the payload root.
+
+Observed during BEL-01B.2b live acceptance:
+After replacing the rejected synthetic fetch with CDP capture of ChatGPT's own request, the first
+live payload was valid JSON but did not expose the historical direct conversation object shape at
+the top level.
+
+Risk:
+Hard-coding a guessed wrapper such as `payload.data` or `payload.conversation` could silently
+bind to the wrong nested object when the private protocol changes again.
+
+Current control:
+The payload parser now searches the captured JSON graph to bounded depth for objects containing both
+a `mapping` object and a `current_node` string. Exactly one structural candidate is required.
+Zero candidates or multiple candidates fail closed. Message contents are not used to choose between
+candidate wrappers.
+
+Tests:
+- direct conversation payload;
+- wrapped conversation payload;
+- zero structural candidates;
+- multiple distinct structural candidates.
+
+Do not:
+Do not add a guessed wrapper fallback without structural evidence and a regression fixture.
+
 ## Response observer binding mismatch
 Failure symptom:
 A response-observation request resolves a conversation payload whose user-turn count, user prompt,
