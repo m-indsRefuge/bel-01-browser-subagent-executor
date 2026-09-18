@@ -185,7 +185,9 @@ Use `show_chatgpt_tab` for human acceptance and confirm exactly one copy of the 
 ## 7. BEL-01B.2b response observation
 
 B.2b reads only the conversation already bound to a governed B.2a submission receipt. It does not
-submit, navigate, scrape the DOM, or enumerate unrelated conversations.
+submit, scrape the DOM, or enumerate unrelated conversations. To reproduce ChatGPT's authenticated
+conversation-history request, it reloads that same bound child tab once and captures only the
+matching ChatGPT-owned conversation payload through CDP.
 
 After reloading the B.2b extension, explicitly reattach the original child tab, then request the
 response using the original submission ID and exact prompt:
@@ -205,8 +207,10 @@ For the accepted B.2a canary, a completed receipt should include:
 - a response SHA-256 fingerprint;
 - `at_most_once: true`.
 
-If generation is still in progress, the observer returns `status: "running"`. Calling the observer
-again is read-only and cannot resubmit the prompt.
+If generation may still be in progress, `wait_ms` may delay the capture by up to 10 seconds. If the
+captured payload still has no successfully finished assistant turn, the observer returns
+`status: "running"`. Calling the observer again cannot resubmit the prompt; it only reloads the
+already-bound child tab and captures the matching payload again.
 
 The observer requires the original prompt text so it can prove that the supplied text hashes to the
 governed submission receipt and that the current branch contains exactly one matching user turn.
