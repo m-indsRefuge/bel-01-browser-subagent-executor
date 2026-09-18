@@ -137,7 +137,12 @@ export function analyzeConversationPayload(
     break
   }
 
-  if (!assistant || !assistant.end_turn || !assistant.text) {
+  if (
+    !assistant ||
+    !assistant.end_turn ||
+    assistant.status !== "finished_successfully" ||
+    !assistant.text
+  ) {
     return {
       status: "running",
       user_turn_count: 1,
