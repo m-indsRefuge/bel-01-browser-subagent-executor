@@ -118,11 +118,12 @@ targets.
 Visually confirm the text is present and unsent. Then clear it:
 
 ```bash
-node scripts/chrome-extension-client.mjs clear_composer_draft '{"tab_id":123}'
+node scripts/chrome-extension-client.mjs clear_composer_draft '{"tab_id":123,"text":"BEL-01B.1 draft canary — do not submit"}'
 ```
 
-Confirm `verified: true`, `submitted: false`, and `composer_empty: true`, then visually confirm
-the composer is empty. Do not press Send during this milestone.
+The clear command requires the same expected draft text and refuses to clear if the composer has
+changed. Confirm `verified: true`, `submitted: false`, and `composer_empty: true`, then visually
+confirm the composer is empty. Do not press Send during this milestone.
 
 After attachment, reload or navigate that ChatGPT tab and inspect sanitized events:
 
