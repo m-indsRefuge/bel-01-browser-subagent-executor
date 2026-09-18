@@ -708,19 +708,20 @@ bounded assistant-response receipt.
 
 
 ## BEL-01B.2b acceptance target
-- focused response-observer fixtures and the existing extension regression suite pass;
+- focused live-turn observer fixtures and the existing extension regression suite pass;
 - TypeScript typecheck and full regression suite pass;
-- the B.2a bound submission receipt survives extension reload;
-- the original bound child tab is reattached explicitly;
-- `observe_submission_response` reconstructs the already-visible canary response without DOM
-  scraping or a new Send;
-- returned conversation identity matches the B.2a receipt;
-- returned response text matches the visually observed assistant response;
-- repeated response observation is idempotent/read-only and does not create another user turn;
-- a mismatched prompt is refused before any response text is returned;
-- human visual inspection confirms the conversation still contains exactly one user turn.
+- a fresh isolated child tab is created and attached;
+- the response observer is armed before any prompt submission;
+- the prompt is written, verified, and submitted through the existing at-most-once B.2a path;
+- the observer binds only to the exact governed user prompt/turn;
+- the assistant response is reconstructed from the live turn stream, not historical DOM/history
+  scraping;
+- completion requires a successfully finished assistant end turn;
+- the returned response and conversation identity are delivered back through the BEL-01 bridge;
+- repeated retrieval does not create another user turn or resubmit the prompt;
+- human visual inspection confirms exactly one user prompt and one corresponding assistant response.
 
-BEL-01B.2b is not complete until the live browser result and human acceptance are recorded.
+Historical response reconstruction is not a BEL-01B.2b acceptance requirement.
 
 
 ## BEL-01B.2b preflight receipt
@@ -730,3 +731,37 @@ BEL-01B.2b is not complete until the live browser result and human acceptance ar
 - live browser reconstruction not yet accepted
 
 BEL-01B.2b remains OPEN pending live observation against the governed B.2a canary conversation.
+
+
+## Architecture correction: live response observation is the production path
+
+Decision:
+Historical reconstruction of an already-completed ChatGPT child conversation is not the BEL-01
+production response path and is no longer a BEL-01B.2 acceptance requirement.
+
+Why:
+BEL-01B.2a was completed before response observation existed, so the first response canary had
+already finished by the time B.2b began. Reconstructing that historical response was attempted only
+to reuse the existing canary. That created work against a private conversation-history interface
+that the intended production executor does not need.
+
+Observed evidence:
+- synthetic conversation-history fetch returned HTTP 401;
+- ChatGPT-owned history capture returned a payload shape that differed from the older Shellby
+  direct-conversation assumption.
+
+Production B.2b path:
+1. create/attach a fresh governed child tab;
+2. arm the response observer before submission;
+3. verify and submit the prompt through the existing at-most-once B.2a path;
+4. bind the observer to the exact submitted prompt/turn;
+5. reconstruct the assistant response from the live HTTP/SSE/WebSocket turn stream;
+6. accept only a successfully finished end turn;
+7. return the bounded response to Byte through the BEL-01 bridge.
+
+Historical conversation recovery:
+Parked as an optional future recovery capability. It must not block or define B.2 completion.
+
+Do not:
+Do not spend implementation time reverse-engineering conversation-history payloads merely to prove
+an already-completed canary. B.2 acceptance must exercise the live production path.
