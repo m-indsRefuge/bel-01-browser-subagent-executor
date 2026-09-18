@@ -94,9 +94,13 @@ Use the returned integer `tab.id` for the next steps:
 
 ```bash
 node scripts/chrome-extension-client.mjs get_tab '{"tab_id":123}'
+node scripts/chrome-extension-client.mjs show_chatgpt_tab '{"tab_id":123}'
 node scripts/chrome-extension-client.mjs attach '{"tab_id":123}'
 node scripts/chrome-extension-client.mjs inspect_composer '{"tab_id":123}'
 ```
+
+`show_chatgpt_tab` explicitly activates the validated ChatGPT child tab and focuses its owning
+Chrome window for human inspection. It does not navigate or submit anything.
 
 The composer inspection is read-only. It returns structural metadata such as tag, role,
 placeholder, data-testid, visibility, and dimensions. It does not read composer contents or
@@ -124,9 +128,8 @@ node scripts/chrome-extension-client.mjs clear_composer_draft '{"tab_id":123,"te
 ```
 
 The clear command requires the same expected draft text and refuses to clear changed content. If
-the composer is already empty it returns `already_empty: true` without mutating anything. Otherwise
-it selects the verified draft, sends only a Backspace input event, waits 750 ms, and verifies stable
-emptiness. Confirm `verified: true`, `submitted: false`, and `composer_empty: true`, then visually
+the composer is already empty it returns `already_empty: true` without mutating anything. Otherwise it focuses the verified editor, sends browser-native Ctrl/Command+A followed by
+Backspace, waits 750 ms, and verifies stable emptiness. Confirm `verified: true`, `submitted: false`, and `composer_empty: true`, then visually
 confirm the composer is empty. Do not press Send during this milestone.
 
 After attachment, reload or navigate that ChatGPT tab and inspect sanitized events:
