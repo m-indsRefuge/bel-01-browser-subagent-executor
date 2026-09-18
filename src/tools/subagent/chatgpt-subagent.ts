@@ -139,8 +139,8 @@ export function createChatGptSubagentService(): ChatGptSubagentService {
     const parentAgent = getAgentIdentity()
     const scope = getScope(parentAgent)
     await beginAgentOperation(parentAgent, scope, request.cloneId, callContext)
-    let sourcePage: Page | undefined
-    let branchPage: Page | undefined
+    let sourcePage: ChatGptManagedPage | undefined
+    let branchPage: ChatGptManagedPage | undefined
     let agent: BrowserAgentState | undefined
     let operationTransferred = false
 
@@ -152,11 +152,19 @@ export function createChatGptSubagentService(): ChatGptSubagentService {
         throw new ChatGptSubagentError("AGENT_BUSY", `Clone ${request.cloneId} already exists.`)
       }
 
-      sourcePage = await createManagedPage()
-      await navigateChatGptPage(sourcePage, request.sourceConversationUrl, signal)
-      await assertAuthenticated(sourcePage)
-      branchPage = await forkLatestConversationTurn(sourcePage, signal)
-      if (branchPage !== sourcePage && !sourcePage.isClosed()) await sourcePage.close().catch(() => undefined)
+      sourcePage = await createManagedPage(signal)
+      await transport.navigate(sourcePage, request.sourceConversationUrl, signal)
+      await transport.ensureReady(sourcePage, signal)
+      if (!transport.forkLatestPage) {
+        throw new ChatGptSubagentError(
+          "BROWSER_UNAVAILABLE",
+          `clone_self is not supported by the ${transport.kind} ChatGPT transport.`
+        )
+      }
+      branchPage = await transport.forkLatestPage(sourcePage, signal)
+      if (branchPage !== sourcePage && !sourcePage.isClosed()) {
+        await transport.closePage(sourcePage).catch(() => undefined)
+      }
       sourcePage = undefined
       agent = {
         agentId: request.cloneId,
@@ -175,8 +183,8 @@ export function createChatGptSubagentService(): ChatGptSubagentService {
       return turnId
     } catch (error) {
       if (agent) scope.agents.delete(agent.agentId)
-      if (branchPage && !branchPage.isClosed()) await branchPage.close().catch(() => undefined)
-      if (sourcePage && !sourcePage.isClosed()) await sourcePage.close().catch(() => undefined)
+      if (branchPage && !branchPage.isClosed()) await transport.closePage(branchPage).catch(() => undefined)
+      if (sourcePage && !sourcePage.isClosed()) await transport.closePage(sourcePage).catch(() => undefined)
       throw error
     } finally {
       if (!operationTransferred) scope.activeOperations.delete(request.cloneId)
