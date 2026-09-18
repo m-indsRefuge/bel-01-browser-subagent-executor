@@ -29,7 +29,7 @@ test("composer draft expression safely encodes arbitrary text", () => {
 test("composer draft commands contain no submission primitive", () => {
   const expressions = [
     buildComposerDraftWriteExpression("BEL-01 draft canary"),
-    buildComposerDraftClearExpression(),
+    buildComposerDraftClearExpression("BEL-01 draft canary"),
   ]
 
   const forbidden = [
@@ -59,11 +59,13 @@ test("composer draft commands contain no submission primitive", () => {
 })
 
 test("composer draft clear reports an empty verified non-submitted composer", () => {
-  const expression = buildComposerDraftClearExpression()
+  const expression = buildComposerDraftClearExpression("BEL-01 draft canary")
 
   assert.ok(expression.includes('const mode = "clear"'))
   assert.ok(expression.includes('const expectedText = mode === "write" ? intendedText : ""'))
+  assert.ok(expression.includes("refuses to clear composer content that does not exactly match the expected draft"))
   assert.ok(expression.includes("composer_empty: composerEmpty"))
   assert.ok(expression.includes("verified: true"))
   assert.ok(expression.includes("replace(/\\u200B/g, \"\").trim()"))
+  assert.ok(expression.includes("replace(/\\r\\n/g, \"\\n\")"))
 })
