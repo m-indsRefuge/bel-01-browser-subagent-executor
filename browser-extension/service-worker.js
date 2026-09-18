@@ -697,13 +697,13 @@ async function handleCommand(command) {
         if (snapshot.status === "completed") {
           const responseText =
             typeof snapshot.response === "string" ? snapshot.response : ""
-          const assistantSha256 = await sha256Hex(responseText)
+          const responseSha256 = await sha256Hex(responseText)
           const observedAt = new Date().toISOString()
 
           await saveSubmissionReceipt({
             ...receipt,
             response_observed_at: observedAt,
-            assistant_sha256: assistantSha256,
+            response_sha256: responseSha256,
             assistant_characters: snapshot.response_total_characters,
             response_truncated: snapshot.response_truncated === true,
           })
@@ -718,7 +718,7 @@ async function handleCommand(command) {
             response_characters: snapshot.response_characters,
             response_total_characters: snapshot.response_total_characters,
             response_truncated: snapshot.response_truncated === true,
-            assistant_sha256: assistantSha256,
+            response_sha256: responseSha256,
             observed_at: observedAt,
             at_most_once: true,
           }
