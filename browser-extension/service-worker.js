@@ -679,6 +679,18 @@ async function loadSubmissionReceipt(submissionId) {
   return receipt
 }
 
+async function findSubmissionReceiptByIdentity(tabId, promptSha256) {
+  const values = await chrome.storage.local.get(null)
+  for (const [key, value] of Object.entries(values)) {
+    if (!key.startsWith("bel01_submission:")) continue
+    if (!value || typeof value !== "object") {
+      throw new Error("Submission ledger contains an invalid entry; refusing fail-open submission.")
+    }
+    if (value.tab_id === tabId && value.prompt_sha256 === promptSha256) return value
+  }
+  return undefined
+}
+
 async function saveSubmissionReceipt(receipt) {
   const submissionId = validateSubmissionId(receipt?.submission_id)
   if (!Number.isInteger(receipt?.tab_id)) {
