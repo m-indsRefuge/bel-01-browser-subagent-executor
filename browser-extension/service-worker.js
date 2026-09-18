@@ -87,6 +87,12 @@ async function pollLoop(generation) {
 
 async function executeAndReport(command, config) {
   try {
+    const expiresAt =
+      typeof command?.expires_at === "string" ? Date.parse(command.expires_at) : Number.NaN
+    if (Number.isFinite(expiresAt) && expiresAt <= Date.now()) {
+      throw new Error("BEL-01 bridge command expired before execution; it was not executed.")
+    }
+
     const result = await handleCommand(command)
     await fetch(`${config.bridgeUrl}/extension/result`, {
       method: "POST",
