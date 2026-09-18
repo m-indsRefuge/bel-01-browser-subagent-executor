@@ -13,7 +13,7 @@ It is intentionally narrower than the final BSAP v2 browser executor. The extens
 - attaches `chrome.debugger` only to ChatGPT tabs;
 - forwards only sanitized CDP metadata during BEL-01B.
 
-It does **not** type into ChatGPT, submit prompts, expose cookies, forward request headers,
+It does **not** type into ChatGPT, submit prompts, read conversation text, expose cookies, forward request headers,
 or provide arbitrary browser control in this milestone.
 
 ## 1. Start the bridge in WSL
@@ -93,7 +93,12 @@ Use the returned integer `tab.id` for the next steps:
 ```bash
 node scripts/chrome-extension-client.mjs get_tab '{"tab_id":123}'
 node scripts/chrome-extension-client.mjs attach '{"tab_id":123}'
+node scripts/chrome-extension-client.mjs inspect_composer '{"tab_id":123}'
 ```
+
+The composer inspection is read-only. It returns structural metadata such as tag, role,
+placeholder, data-testid, visibility, and dimensions. It does not read composer contents or
+conversation text and does not mutate the page.
 
 After attachment, reload or navigate that ChatGPT tab and inspect sanitized events:
 
