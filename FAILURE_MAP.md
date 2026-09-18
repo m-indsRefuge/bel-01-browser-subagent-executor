@@ -468,6 +468,93 @@ escapes before Chrome execution.
 Tests:
 - test/chrome-extension-composer-draft.test.ts
 
+## Response observer binding mismatch
+Failure symptom:
+A response-observation request resolves a conversation payload whose user-turn count, user prompt,
+tab binding, or conversation identity does not match the governed submission receipt.
+
+Risk:
+BEL-01 could return an assistant message from the wrong conversation or from a later unrelated turn.
+
+Current controls:
+- `observe_submission_response` requires an existing `status: "bound"` submission receipt;
+- the caller must provide the original prompt text, whose SHA-256 must match the stored prompt
+  fingerprint;
+- the original child tab must still be attached and its concrete `/c/...` conversation identity
+  must match the receipt;
+- BEL-01B.2b currently supports only B.2a first-turn conversations and therefore requires exactly
+  one user-role message on the current branch;
+- that user message must NFKC/whitespace-normalize to the exact governed prompt;
+- only an assistant-role message after that prompt with recipient `all`/null and
+  `end_turn: true` is accepted.
+
+Safe recovery:
+Treat any binding mismatch as a hard failure. Inspect the ledger/tab relationship before changing
+the matching rules.
+
+Do not:
+Do not fall back to "latest assistant message" without exact prompt and conversation binding.
+
+## Conversation payload fetch / protocol drift
+Failure symptom:
+The authenticated in-page request to `/backend-api/conversations/<conversation_id>` fails, or the
+returned payload no longer contains the expected `mapping` and `current_node` structure.
+
+Risk:
+Guessing around a private protocol change could return partial or unrelated content.
+
+Current control:
+Fetch errors and payload-shape errors are explicit failures. The observer does not fall back to DOM
+scraping, arbitrary CDP response bodies, or broader page extraction.
+
+Tests:
+- test/chrome-extension-response-observer.test.ts
+
+Safe recovery:
+Capture only the minimum structural evidence needed to update the frozen payload parser, add tests,
+then retest. Do not broaden browser read scope as an automatic workaround.
+
+## Response still generating
+Failure symptom:
+The bound conversation contains the governed user prompt but no final visible assistant turn with
+`end_turn: true`.
+
+Current control:
+The observer returns `status: "running"`. Each command may wait at most 10 seconds and polls at
+250 ms. Repeated observation is read-only and does not submit or mutate the page.
+
+Do not:
+Do not treat partial assistant text as a completed response.
+
+## Oversized assistant response
+Failure symptom:
+A completed assistant response exceeds the bounded response-return limit.
+
+Current control:
+BEL-01B.2b returns at most 128,000 characters and explicitly reports
+`response_truncated: true`, `response_characters`, and `response_total_characters`.
+
+Risk:
+A truncated response is not a complete sub-agent artifact.
+
+Safe recovery:
+Treat truncation as incomplete delivery. A future chunk/pagination capability should be added before
+large responses are considered fully retrievable.
+
+## Response content persistence
+Risk:
+Assistant text could become durable browser-extension state even though only turn identity and
+verification metadata are needed for recovery.
+
+Current control:
+The completed response text is returned to the caller but is not written into the submission ledger.
+The ledger stores only response metadata/fingerprint fields alongside the pre-existing submission
+receipt.
+
+Do not:
+Do not persist full assistant response text in chrome.storage.local without a separate retention
+decision.
+
 ## Browser protocol drift
 Symptoms include composer discovery failure, prompt binding failure, response reconstruction failure, or CHATGPT_UI_CHANGED.
 Do not automatically resend an uncertain prompt.
@@ -556,3 +643,19 @@ BEL-01B.2a STATUS: COMPLETE
 Next milestone: BEL-01B.2b — response observation and reconstruction. The executor must bind only to
 the accepted submitted turn, observe completion without DOM scraping or duplicate sends, and return a
 bounded assistant-response receipt.
+
+
+## BEL-01B.2b acceptance target
+- focused response-observer fixtures and the existing extension regression suite pass;
+- TypeScript typecheck and full regression suite pass;
+- the B.2a bound submission receipt survives extension reload;
+- the original bound child tab is reattached explicitly;
+- `observe_submission_response` reconstructs the already-visible canary response without DOM
+  scraping or a new Send;
+- returned conversation identity matches the B.2a receipt;
+- returned response text matches the visually observed assistant response;
+- repeated response observation is idempotent/read-only and does not create another user turn;
+- a mismatched prompt is refused before any response text is returned;
+- human visual inspection confirms the conversation still contains exactly one user turn.
+
+BEL-01B.2b is not complete until the live browser result and human acceptance are recorded.
