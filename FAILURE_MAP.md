@@ -136,6 +136,26 @@ Do not:
 Do not add typing, submission, arbitrary DOM queries, or conversation-text extraction to this
 milestone.
 
+## Ephemeral Chrome tab identity
+Failure symptom:
+A command returns `No tab with id: <tab_id>` even though that tab ID was valid earlier in the
+milestone.
+
+Cause:
+Chrome tab IDs are runtime identities. If the tab is closed, replaced, or otherwise removed, the
+previous ID is no longer valid.
+
+Observed during BEL-01B.1:
+The draft-write canary targeted tab 709320461 after that tab had ceased to exist. BEL-01 rejected
+the operation before any page mutation occurred.
+
+Safe recovery:
+Do not reuse or guess a replacement tab ID. Create a fresh inactive ChatGPT tab, capture its returned
+ID, attach it explicitly, inspect the composer, then continue.
+
+Do not:
+Do not silently retarget an operation to another ChatGPT tab when the intended tab ID disappears.
+
 ## Stale staged extension build
 Failure symptom:
 The WSL repository contains a new allow-listed command but Chrome returns
