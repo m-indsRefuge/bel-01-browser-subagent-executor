@@ -23,10 +23,11 @@ export function buildComposerDraftWriteExpression(text) {
   })
 }
 
-export function buildComposerDraftClearExpression() {
+export function buildComposerDraftClearExpression(expectedText) {
+  const validated = validateComposerDraft(expectedText)
   return buildComposerMutationExpression({
     mode: "clear",
-    textLiteral: "null",
+    textLiteral: JSON.stringify(validated),
   })
 }
 
@@ -77,10 +78,15 @@ function buildComposerMutationExpression({ mode, textLiteral }) {
     const tag = element.tagName.toLowerCase();
     const isTextarea = tag === "textarea";
     const currentText = isTextarea ? element.value : (element.innerText || element.textContent || "");
-    const meaningfulCurrentText = currentText.replace(/\\u200B/g, "").trim();
+    const normalizedCurrentText = currentText.replace(/\\r\\n/g, "\\n");
+    const normalizedIntendedText = intendedText.replace(/\\r\\n/g, "\\n");
+    const meaningfulCurrentText = normalizedCurrentText.replace(/\\u200B/g, "").trim();
 
     if (mode === "write" && meaningfulCurrentText.length !== 0) {
       throw new Error("BEL-01B.1 refuses to overwrite a non-empty composer.");
+    }
+    if (mode === "clear" && normalizedCurrentText !== normalizedIntendedText) {
+      throw new Error("BEL-01B.1 refuses to clear composer content that does not exactly match the expected draft.");
     }
 
     element.focus();
