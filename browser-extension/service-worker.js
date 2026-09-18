@@ -446,14 +446,14 @@ async function handleCommand(command) {
         throw new Error(`Tab ${tab.id} is not attached. Run attach first.`)
       }
 
-      const identityMatch = await findSubmissionReceiptByIdentity(tab.id, promptSha256)
-      if (identityMatch) {
+      const tabReceipt = await findSubmissionReceiptByTab(tab.id)
+      if (tabReceipt) {
         throw new Error(
-          "This tab and prompt are already tracked by submission_id " +
-            identityMatch.submission_id +
+          "This child tab is already tracked by submission_id " +
+            tabReceipt.submission_id +
             " with status " +
-            identityMatch.status +
-            "; refusing a second submission identity."
+            tabReceipt.status +
+            "; BEL-01B.2a allows only one first-turn submission per tab."
         )
       }
 
@@ -709,14 +709,14 @@ async function loadSubmissionReceipt(submissionId) {
   return receipt
 }
 
-async function findSubmissionReceiptByIdentity(tabId, promptSha256) {
+async function findSubmissionReceiptByTab(tabId) {
   const values = await chrome.storage.local.get(null)
   for (const [key, value] of Object.entries(values)) {
     if (!key.startsWith("bel01_submission:")) continue
     if (!value || typeof value !== "object") {
       throw new Error("Submission ledger contains an invalid entry; refusing fail-open submission.")
     }
-    if (value.tab_id === tabId && value.prompt_sha256 === promptSha256) return value
+    if (value.tab_id === tabId) return value
   }
   return undefined
 }
