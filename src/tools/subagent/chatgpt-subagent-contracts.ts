@@ -1,15 +1,35 @@
 import { z } from "zod"
 
-export const chatGptSubagentStatusSchema = z.enum(["running", "completed", "failed"])
+export const chatGptSubagentStatusSchema = z.enum([
+  "running",
+  "permission_required",
+  "completed",
+  "failed",
+])
 export const chatGptSubagentActivitySchema = z.enum(["Working", "Searching the web", "Using tools", "Generating response"])
 
 export type ChatGptSubagentStatus = z.infer<typeof chatGptSubagentStatusSchema>
 export type ChatGptSubagentActivity = z.infer<typeof chatGptSubagentActivitySchema>
 
+export interface ChatGptPermissionRequest {
+  requestId: string
+  capability: string
+  reason: string
+  scope?: string
+}
+
 export interface ChatGptSubagentRequest {
   prompt: string
   agentId: string
   memory: boolean
+  grants: string[]
+}
+
+export interface ChatGptPermissionDecisionRequest {
+  agentId: string
+  requestId: string
+  decision: "grant" | "deny"
+  note?: string
 }
 
 export interface ChatGptCloneSelfRequest {
@@ -34,6 +54,7 @@ export interface ChatGptSubagentPollResult {
   response?: string
   errorCode?: string
   errorMessage?: string
+  permissionRequest?: ChatGptPermissionRequest
 }
 
 export type ChatGptSubagentErrorCode =
@@ -64,6 +85,10 @@ export interface ChatGptSubagentService {
   cloneSelf(request: ChatGptCloneSelfRequest, context: ChatGptSubagentCallContext): Promise<string>
   cloneRun(request: ChatGptCloneRunRequest, context: ChatGptSubagentCallContext): Promise<string>
   poll(turnId: string, waitMs: number, signal?: AbortSignal): Promise<ChatGptSubagentPollResult>
+  resolvePermission(
+    request: ChatGptPermissionDecisionRequest,
+    context: ChatGptSubagentCallContext
+  ): Promise<string>
   drainEvents(): string[]
   dispose(): Promise<void>
 }
