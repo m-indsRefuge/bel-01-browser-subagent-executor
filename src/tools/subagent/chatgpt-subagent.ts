@@ -16,12 +16,19 @@ import type {
   ChatGptManagedPage,
   ChatGptSubagentTransport,
 } from "./chatgpt-subagent-transport.js"
+import {
+  bsapChildPolicy,
+  bsapPermissionDecisionPrompt,
+  parseBsapPermissionRequest,
+} from "./bsap-permission.js"
 import { createSubagentStore } from "./subagent-store.js"
 import {
   ChatGptSubagentError,
   type ChatGptSubagentCallContext,
   type ChatGptCloneRunRequest,
   type ChatGptCloneSelfRequest,
+  type ChatGptPermissionDecisionRequest,
+  type ChatGptPermissionRequest,
   type ChatGptSubagentActivity,
   type ChatGptSubagentPollResult,
   type ChatGptSubagentRequest,
@@ -55,18 +62,21 @@ interface BrowserAgentState {
   lastCompletedAt?: number
   lastUsedAt: number
   turnCount: number
+  grants: Set<string>
+  pendingPermission?: ChatGptPermissionRequest
 }
 
 interface BrowserTurnState {
   turnId: string
   agentId: string
   parentAgent?: AgentIdentity
-  status: "running" | "completed" | "failed"
+  status: "running" | "permission_required" | "completed" | "failed"
   recoveryAttempted: boolean
   lastActivityAt: number
   response?: string
   errorCode?: string
   errorMessage?: string
+  permissionRequest?: ChatGptPermissionRequest
   prompt: string
   observation?: AssistantResponseObservation
   settled: Promise<void>
