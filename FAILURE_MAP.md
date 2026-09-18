@@ -409,5 +409,7 @@ Verify Codex source commit, architecture, Rust/Cargo versions, and SHA-256 befor
 - human visual inspection confirms the composer is empty after clear: PASS
 - submitted remains false throughout the observed workflow: PASS
 
-Final BEL-01B.1 milestone closure still requires the focused composer-draft tests and TypeScript
-typecheck to be rerun against the latest native-clear/show-tab revision.
+- latest focused Chrome-extension bridge/sanitizer/composer test suite: PASS
+- latest TypeScript typecheck against native-clear/show-tab revision: PASS
+
+BEL-01B.1 STATUS: COMPLETE
