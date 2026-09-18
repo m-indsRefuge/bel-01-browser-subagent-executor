@@ -455,19 +455,29 @@ export function createChatGptSubagentService(): ChatGptSubagentService {
   async function disposeSubagents(): Promise<void> {
     disposed = true
     clearInterval(cleanupTimer)
-    const connectedBrowser = browser
     const allTurns = [...scopes.values()].flatMap((scope) => [...scope.turns.values()])
     const allAgents = [...scopes.values()].flatMap((scope) => [...scope.agents.values()])
-    const observations = allTurns.map((turn) => turn.observation).filter((value): value is AssistantResponseObservation => value !== undefined)
-    const pages = allAgents.map((agent) => agent.page).filter((page): page is Page => page !== undefined && !page.isClosed())
+    const observations = allTurns
+      .map((turn) => turn.observation)
+      .filter(
+        (value): value is AssistantResponseObservation => value !== undefined
+      )
+    const pages = allAgents
+      .map((agent) => agent.page)
+      .filter(
+        (page): page is ChatGptManagedPage =>
+          page !== undefined && !page.isClosed()
+      )
+
     for (const turn of allTurns) turn.settle()
     scopes.clear()
-    context = undefined
-    browser = undefined
-    connectPromise = undefined
     store?.close()
-    await Promise.allSettled([...observations.map((observation) => observation.dispose()), ...pages.map((page) => page.close())])
-    await connectedBrowser?.close().catch(() => undefined)
+
+    await Promise.allSettled([
+      ...observations.map((observation) => observation.dispose()),
+      ...pages.map((page) => transport.closePage(page)),
+    ])
+    await transport.dispose()
   }
 
   async function beginAgentOperation(
