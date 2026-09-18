@@ -160,6 +160,87 @@ export function createChatGptSubagentService(): ChatGptSubagentService {
     }
   }
 
+  async function resolvePermission(
+    request: ChatGptPermissionDecisionRequest,
+    callContext: ChatGptSubagentCallContext
+  ): Promise<string> {
+    const parentAgent = getAgentIdentity()
+    const scope = getScope(parentAgent)
+    let agent = scope.agents.get(request.agentId)
+
+    if (!agent) {
+      const persisted = store?.get(parentAgent, request.agentId)
+      if (!persisted) {
+        throw new ChatGptSubagentError(
+          "AGENT_TARGET_LOST",
+          `Unknown agent: ${request.agentId}`
+        )
+      }
+      agent = {
+        agentId: request.agentId,
+        kind: persisted.kind,
+        memory: true,
+        status: "idle",
+        lastUsedAt: Date.now(),
+        turnCount: persisted.turnCount,
+        conversationUrl: persisted.conversationUrl,
+        grants: new Set(persisted.grants),
+        pendingPermission: persisted.pendingPermission,
+      }
+      scope.agents.set(agent.agentId, agent)
+    }
+
+    const pending = agent.pendingPermission
+    if (!pending || pending.requestId !== request.requestId) {
+      throw new ChatGptSubagentError(
+        "AGENT_BUSY",
+        `Agent ${request.agentId} is not waiting for permission request ${request.requestId}.`
+      )
+    }
+
+    await beginAgentOperation(parentAgent, scope, request.agentId, callContext)
+    let operationTransferred = false
+    const alreadyGranted = agent.grants.has(pending.capability)
+
+    try {
+      if (request.decision === "grant") {
+        agent.grants.add(pending.capability)
+      }
+
+      const decisionPrompt = bsapPermissionDecisionPrompt({
+        requestId: pending.requestId,
+        capability: pending.capability,
+        decision: request.decision,
+        note: request.note,
+      })
+      const turnId = await submitAgentTurn(
+        parentAgent,
+        scope,
+        agent,
+        decisionPrompt
+      )
+
+      agent.pendingPermission = undefined
+      persistAgent(parentAgent, agent)
+      operationTransferred = true
+      return turnId
+    } catch (error) {
+      if (
+        request.decision === "grant" &&
+        !alreadyGranted &&
+        !operationTransferred
+      ) {
+        agent.grants.delete(pending.capability)
+      }
+      if (!operationTransferred) agent.status = "idle"
+      throw error
+    } finally {
+      if (!operationTransferred) {
+        scope.activeOperations.delete(request.agentId)
+      }
+    }
+  }
+
   async function cloneSelf(request: ChatGptCloneSelfRequest, callContext: ChatGptSubagentCallContext): Promise<string> {
     const { signal } = callContext
     const parentAgent = getAgentIdentity()
