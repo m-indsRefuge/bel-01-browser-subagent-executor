@@ -659,3 +659,12 @@ bounded assistant-response receipt.
 - human visual inspection confirms the conversation still contains exactly one user turn.
 
 BEL-01B.2b is not complete until the live browser result and human acceptance are recorded.
+
+
+## BEL-01B.2b preflight receipt
+- focused Chrome extension suite including response-observer fixtures: PASS
+- TypeScript typecheck: PASS
+- full regression suite: PASS
+- live browser reconstruction not yet accepted
+
+BEL-01B.2b remains OPEN pending live observation against the governed B.2a canary conversation.
