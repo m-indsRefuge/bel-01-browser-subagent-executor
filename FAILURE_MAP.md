@@ -93,6 +93,28 @@ Current controls:
 Do not:
 Broaden the command surface or site scope without an explicit BSAP capability decision and tests.
 
+## Sanitized CDP metadata leaks secrets through URLs
+Failure symptom:
+The event stream omits request headers and WebSocket payload contents but still contains full URLs
+with query strings, signed download parameters, account identifiers, or verification tokens.
+
+Observed during BEL-01B:
+The first live sanitized stream included signed file URLs, an account_id query parameter, and a
+WebSocket verify token.
+
+Cause:
+URL values were forwarded without stripping query strings or identifier-like path segments.
+
+Current control:
+All forwarded HTTP/WebSocket URLs are reduced to scheme + host + sanitized pathname. Query strings
+and fragments are removed, and UUID/project/file/user-style path identifiers are redacted.
+
+Tests:
+- test/chrome-extension-sanitize.test.ts
+
+Do not:
+Do not broaden CDP event forwarding or reintroduce raw URLs without explicit redaction tests.
+
 ## Browser protocol drift
 Symptoms include composer discovery failure, prompt binding failure, response reconstruction failure, or CHATGPT_UI_CHANGED.
 Do not automatically resend an uncertain prompt.
