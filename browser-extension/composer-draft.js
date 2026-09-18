@@ -1,6 +1,7 @@
 import { COMPOSER_SELECTORS } from "./composer-inspection.js"
 
 const MAX_DRAFT_CHARACTERS = 12_000
+const DRAFT_STABILIZATION_MS = 750
 
 export function validateComposerDraft(text) {
   if (typeof text !== "string") {
@@ -15,22 +16,22 @@ export function validateComposerDraft(text) {
   return text
 }
 
-export function buildComposerDraftWriteExpression(text) {
-  const validated = validateComposerDraft(text)
-  return buildComposerMutationExpression({
-    mode: "write",
-    textLiteral: JSON.stringify(validated),
+export function buildComposerDraftPrepareWriteExpression() {
+  return buildComposerTargetExpression({
+    expectedLiteral: "null",
+    requireEmpty: true,
+    selectAll: false,
   })
 }
 
-export function buildComposerDraftClearExpression(expectedText) {
+export function buildComposerDraftPrepareClearExpression(expectedText) {
   const validated = validateComposerDraft(expectedText)
-  return buildComposerMutationExpression({
-    mode: "clear",
-    textLiteral: JSON.stringify(validated),
+  return buildComposerTargetExpression({
+    expectedLiteral: JSON.stringify(validated),
+    requireEmpty: false,
+    selectAll: true,
   })
 }
-
 
 export function buildComposerDraftCompareExpression(expectedText) {
   const validated = validateComposerDraft(expectedText)
@@ -124,13 +125,12 @@ export function buildComposerDraftCompareExpression(expectedText) {
   })()`
 }
 
-function buildComposerMutationExpression({ mode, textLiteral }) {
+function buildComposerTargetExpression({ expectedLiteral, requireEmpty, selectAll }) {
   const selectors = JSON.stringify(COMPOSER_SELECTORS)
 
   return `(() => {
     const selectors = ${selectors};
-    const mode = ${JSON.stringify(mode)};
-    const intendedText = ${textLiteral};
+    const expectedText = ${expectedLiteral};
     const seen = new Set();
     const candidates = [];
 
@@ -148,16 +148,12 @@ function buildComposerMutationExpression({ mode, textLiteral }) {
           style.visibility !== "hidden";
 
         const tag = element.tagName.toLowerCase();
-        const contenteditable = element.getAttribute("contenteditable") === "true";
-        const textarea = tag === "textarea";
         const editable =
-          (contenteditable || textarea) &&
+          (element.getAttribute("contenteditable") === "true" || tag === "textarea") &&
           !element.hasAttribute("disabled") &&
           !element.hasAttribute("readonly");
 
-        if (visible && editable) {
-          candidates.push({ element, selector });
-        }
+        if (visible && editable) candidates.push({ element, selector });
       }
     }
 
@@ -170,72 +166,47 @@ function buildComposerMutationExpression({ mode, textLiteral }) {
     const { element, selector } = candidates[0];
     const tag = element.tagName.toLowerCase();
     const isTextarea = tag === "textarea";
-    const currentText = isTextarea ? element.value : (element.innerText || element.textContent || "");
-    const normalizedCurrentText = currentText.replace(/\\r\\n/g, "\\n");
-    const normalizedIntendedText = intendedText.replace(/\\r\\n/g, "\\n");
-    const meaningfulCurrentText = normalizedCurrentText.replace(/\\u200B/g, "").trim();
+    const currentText =
+      isTextarea ? element.value : (element.innerText || element.textContent || "");
+    const normalizeNewlines = (value) => value.replace(/\\r\\n/g, "\\n");
+    const normalizedCurrent = normalizeNewlines(currentText);
+    const meaningfulCurrent = normalizedCurrent
+      .replace(/[\\u200B\\u200C\\u200D\\uFEFF]/g, "")
+      .trim();
 
-    if (mode === "write" && meaningfulCurrentText.length !== 0) {
+    if (${JSON.stringify(requireEmpty)} && meaningfulCurrent.length !== 0) {
       throw new Error("BEL-01B.1 refuses to overwrite a non-empty composer.");
     }
-    if (mode === "clear" && normalizedCurrentText !== normalizedIntendedText) {
-      throw new Error("BEL-01B.1 refuses to clear composer content that does not exactly match the expected draft.");
+
+    if (!${JSON.stringify(requireEmpty)} && normalizedCurrent !== normalizeNewlines(expectedText)) {
+      throw new Error(
+        "BEL-01B.1 refuses to clear composer content that does not exactly match the expected draft."
+      );
     }
 
     element.focus();
 
-    if (isTextarea) {
-      const prototype = window.HTMLTextAreaElement.prototype;
-      const valueSetter = Object.getOwnPropertyDescriptor(prototype, "value")?.set;
-      if (!valueSetter) throw new Error("Native textarea value setter unavailable.");
-
-      valueSetter.call(element, mode === "write" ? intendedText : "");
-      element.dispatchEvent(new InputEvent("input", {
-        bubbles: true,
-        composed: true,
-        inputType: mode === "write" ? "insertText" : "deleteContentBackward",
-        data: mode === "write" ? intendedText : null,
-      }));
-    } else {
-      const selection = window.getSelection();
-      const range = document.createRange();
-      range.selectNodeContents(element);
-      selection.removeAllRanges();
-      selection.addRange(range);
-
-      const command = mode === "write" ? "insertText" : "delete";
-      const commandValue = mode === "write" ? intendedText : null;
-      const changed = document.execCommand(command, false, commandValue);
-      selection.removeAllRanges();
-
-      if (!changed) {
-        throw new Error("Browser rejected the composer draft mutation.");
+    if (${JSON.stringify(selectAll)}) {
+      if (isTextarea) {
+        element.setSelectionRange(0, element.value.length);
+      } else {
+        const selection = window.getSelection();
+        const range = document.createRange();
+        range.selectNodeContents(element);
+        selection.removeAllRanges();
+        selection.addRange(range);
       }
     }
 
-    const observedText = isTextarea ? element.value : (element.innerText || element.textContent || "");
-    const expectedText = mode === "write" ? intendedText : "";
-    const normalizedObservedText = observedText.replace(/\\r\\n/g, "\\n");
-    const normalizedExpectedText = expectedText.replace(/\\r\\n/g, "\\n");
-    const composerEmpty = normalizedObservedText.replace(/\\u200B/g, "").trim().length === 0;
-
-    if (mode === "write" && normalizedObservedText !== normalizedExpectedText) {
-      throw new Error("Composer draft verification failed.");
-    }
-    if (mode === "clear" && !composerEmpty) {
-      throw new Error("Composer draft clear verification failed.");
-    }
-
     return {
-      mode,
       selector_hint: selector,
       tag,
-      characters_written: mode === "write" ? intendedText.length : 0,
-      composer_empty: composerEmpty,
-      verified: true,
+      current_length: currentText.length,
+      focused: document.activeElement === element,
+      selection_prepared: ${JSON.stringify(selectAll)},
       submitted: false,
     };
   })()`
 }
 
-export { MAX_DRAFT_CHARACTERS }
+export { DRAFT_STABILIZATION_MS, MAX_DRAFT_CHARACTERS }
