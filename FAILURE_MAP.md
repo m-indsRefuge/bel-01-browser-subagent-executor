@@ -556,3 +556,163 @@ BEL-01B.2a STATUS: COMPLETE
 Next milestone: BEL-01B.2b — response observation and reconstruction. The executor must bind only to
 the accepted submitted turn, observe completion without DOM scraping or duplicate sends, and return a
 bounded assistant-response receipt.
+
+
+## BEL-01C — live child stream contains response content
+Failure symptom:
+The bridge event buffer or operator event endpoint contains assistant/user turn payload text while an
+autonomous child observer is armed.
+
+Cause:
+Unlike the general CDP telemetry stream, the scoped `subagent_turn_stream` must carry the actual
+conversation SSE/WebSocket payload so Shellby's existing `ChatGptTurnTracker` can bind the exact
+prompt and reconstruct the assistant response.
+
+Current controls:
+- raw turn payload forwarding exists only while an explicit observer is armed for one validated
+  ChatGPT child tab;
+- every event carries an unguessable observation_id and tab_id and is ignored by other observers;
+- generic CDP telemetry remains sanitized and does not gain payload access;
+- the bridge remains loopback-only and bearer-authenticated;
+- the observer is disarmed after completion/disposal.
+
+Data risk:
+The in-memory bridge event buffer can temporarily contain child prompt/response content. Treat
+`/operator/events` output and bridge process memory as sensitive while a child turn is running.
+
+Do not:
+Do not write `subagent_turn_stream` payloads to normal logs or broaden them to unrelated tabs.
+
+## BEL-01C — MV3 observer loss during a submitted turn
+Failure symptom:
+A prompt is submitted, but the Chrome extension service worker reloads, debugger attachment is
+lost, or the in-memory turnObservers map disappears before completion.
+
+Risk:
+The prompt may already be executing upstream while Shellby can no longer observe its response.
+
+Current control:
+The extension turn ledger preserves at-most-once submission identity in chrome.storage.local.
+Shellby never automatically resubmits a submitted turn. If live observation cannot be recovered,
+the child becomes uncertain rather than guessing that the prompt failed.
+
+Safe recovery:
+Inspect the original child/conversation and ledger state. Do not create a replacement turn_id for
+the same logical prompt merely because the observer disappeared.
+
+Do not:
+Do not treat extension-worker restart as evidence that no upstream submission occurred.
+
+## BEL-01C — bridge event-retention gap
+Failure symptom:
+The Node observer cursor falls behind the bridge's retained event window and
+`oldest_sequence > cursor + 1`.
+
+Risk:
+Dropping one or more SSE/WebSocket chunks could cause incorrect prompt binding or an incomplete
+assistant response.
+
+Current control:
+The extension transport detects retention gaps and fails the observation instead of feeding a
+partial stream to `ChatGptTurnTracker`.
+
+Safe recovery:
+Preserve the turn as uncertain if it was already submitted. Increase retention only with measured
+evidence; do not silently skip the gap.
+
+## BEL-01C — submitted but not yet conversation-bound
+Failure symptom:
+The Send click may have occurred, but the first child turn does not expose a concrete /c/... URL
+within the binding timeout.
+
+Prior risk:
+Treating this as a failed start disposed the already-armed observer and lost the best evidence for
+the submitted turn.
+
+Current control:
+`submit_agent_turn_once` persists the turn receipt before clicking. Once a click may have happened,
+it returns an armed/uncertain no-resubmit receipt instead of throwing the live turn away. Shellby
+keeps the observer running, allowing the response protocol itself to supply conversation identity.
+Replaying the same turn_id returns the existing receipt and never clicks again.
+
+Do not:
+Do not automatically resubmit an armed or uncertain agent turn.
+
+## BEL-01C — permission grant is control-plane state, not yet a hard tool firewall
+Failure symptom:
+A child ignores the BSAP policy text and attempts an MCP capability that is not in its grant set.
+
+Current implementation:
+- initial grants are explicit on `subagent_run`;
+- grants and pending permission requests persist with the durable child in SQLite;
+- an ungranted requirement is represented by a structured `<bsap_permission_request>` envelope;
+- `subagent_result` surfaces `permission_required`;
+- Byte resolves it with `subagent_permission`;
+- grant/deny resumes the same durable agent_id and conversation.
+
+Important boundary:
+BEL-01C does not yet have a trustworthy parent-child MCP session identity link at the tool
+registration boundary. Therefore the grant set is currently a governed conversational/control-plane
+contract, not a cryptographic or server-enforced capability sandbox.
+
+Safe operation:
+Use the permission protocol for governed autonomous work, but do not describe an ungranted tool as
+technically impossible for the child until session-level enforcement exists.
+
+Next hardening:
+Bind child browser identity to its MCP session and reject ungranted tool calls server-side before
+execution.
+
+## BEL-01C — permission decision/resume race
+Failure symptom:
+A fast resumed child creates a new permission request while the parent is still clearing the old
+request, causing the new request to be lost.
+
+Current control:
+The old pending request is removed before the resume turn is submitted. If submission fails before
+a live turn is established, the prior request/grant state is rolled back. A new request produced by
+the resumed turn is not overwritten by post-submit cleanup.
+
+## BEL-01C — non-persistent child loses conversation history
+Failure symptom:
+An agent created with memory=false completes turn 1 but cannot continue turn 2 because its current
+conversation URL was never retained.
+
+Cause:
+Persistent-memory policy was incorrectly coupled to in-process conversation identity.
+
+Current control:
+Conversation identity is retained for every live child so turn history survives within the runtime.
+Only SQLite persistence across runtime restart remains gated by memory=true.
+
+## BEL-01C — extension transport clone limitation
+Failure symptom:
+`clone_self` is called while the extension transport is selected.
+
+Current boundary:
+The extension transport does not yet implement Shellby's conversation-fork primitive.
+`clone_self` fails explicitly rather than approximating a fork or opening an unrelated chat.
+Normal `subagent_run` durable children are supported.
+
+Do not:
+Do not emulate clone semantics by copying visible conversation text or silently starting a fresh
+child.
+
+## BEL-01C acceptance target
+Before BEL-01C is complete:
+- TypeScript typecheck passes;
+- production build passes;
+- non-live regression suite passes;
+- extension bridge is healthy and the staged Chrome extension matches branch source;
+- the production live test explicitly selects transport=extension;
+- one fresh durable child completes an autonomous first turn;
+- the same agent_id completes a second turn and recalls context supplied only in turn 1;
+- the live observer is armed before every Send;
+- each submitted Shellby turn_id has at-most-once extension ledger semantics;
+- an intentionally ungranted capability produces status=permission_required;
+- Byte grants that request through subagent_permission;
+- the same durable child resumes and completes the original permission-gated task;
+- no tool side effect is required for the permission control-plane acceptance;
+- a sanitized live artifact is written under test/live/artifacts.
+
+BEL-01C STATUS: IN PROGRESS
