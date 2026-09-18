@@ -39,6 +39,42 @@ Status: SUPERSEDED FOR BEL-01B POC.
 The dedicated-profile raw-CDP route remains available for future use, but BEL-01B now tests a
 permissioned extension transport inside the user's existing authenticated Chrome profile.
 
+## Bridge command timeout race
+Failure symptom:
+The operator CLI times out or appears to fail while the extension reconnects, and a queued command
+may otherwise remain available for later delivery.
+
+Cause:
+The original BEL-01B bridge used a 20-second extension long poll while the operator CLI also stopped
+waiting after roughly 20 seconds. That created a timing race around MV3 service-worker suspension,
+poll rollover, or temporary extension reconnects.
+
+Risk:
+A command that the operator believes failed could execute later. This is unacceptable for browser
+mutation commands and would be especially dangerous for future submit actions.
+
+Current controls:
+- extension long-poll interval reduced to 10 seconds;
+- operator waits up to 60 seconds for an explicit result;
+- queued commands expire after 45 seconds by default;
+- the bridge converts expired queued commands into explicit failed results instead of delivering them;
+- the extension independently refuses any command whose expiry timestamp has passed;
+- timeout errors include bridge health metadata for diagnosis.
+
+Environment overrides:
+- BEL01_BRIDGE_LONG_POLL_MS
+- BEL01_BRIDGE_COMMAND_TTL_MS
+- BEL01_BRIDGE_WAIT_MS
+- BEL01_BRIDGE_RESULT_POLL_MS
+
+Tests:
+- test/chrome-extension-bridge.test.ts
+
+Do not:
+Do not automatically retry a timed-out mutation command unless its prior command result is known to
+be expired or rejected. Future submit capability requires an even stronger at-most-once execution
+contract.
+
 ## Existing-profile extension bridge unavailable
 Failure symptom: the extension Options page cannot reach http://127.0.0.1:9233, or operator
 commands remain pending.
