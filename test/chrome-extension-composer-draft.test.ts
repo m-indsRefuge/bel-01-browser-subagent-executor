@@ -63,6 +63,7 @@ test("composer draft clear reports an empty verified non-submitted composer", ()
 
   assert.ok(expression.includes('const mode = "clear"'))
   assert.ok(expression.includes('const expectedText = mode === "write" ? intendedText : ""'))
-  assert.ok(expression.includes("composer_empty: observedText.length === 0"))
+  assert.ok(expression.includes("composer_empty: composerEmpty"))
   assert.ok(expression.includes("verified: true"))
+  assert.ok(expression.includes("replace(/\\u200B/g, \"\").trim()"))
 })
