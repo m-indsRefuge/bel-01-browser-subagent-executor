@@ -13,9 +13,10 @@ It is intentionally narrower than the final BSAP v2 browser executor. The extens
 - attaches `chrome.debugger` only to ChatGPT tabs;
 - forwards only sanitized CDP metadata during BEL-01B.
 
-BEL-01B.1 adds one explicit draft-only mutation capability. It may write or clear an unsent draft in
-an empty, uniquely identified ChatGPT composer. It does **not** submit prompts, read conversation
-text, overwrite an existing draft, expose cookies, forward request headers, or provide arbitrary
+BEL-01B.1 adds explicit draft-only mutation. BEL-01B.2a adds one separate at-most-once submission
+capability for a fresh child tab. Submission requires an exact draft match, a persistent submission
+identity, and a uniquely identified visible Send button. It does **not** use Enter as a submission
+fallback, read conversation text, expose cookies, forward request headers, or provide arbitrary
 browser control.
 
 ## 1. Start the bridge in WSL
@@ -131,6 +132,57 @@ The clear command requires the same expected draft text and refuses to clear cha
 the composer is already empty it returns `already_empty: true` without mutating anything. Otherwise it focuses the verified editor, sends browser-native Ctrl/Command+A followed by
 Backspace, waits 750 ms, and verifies stable emptiness. Confirm `verified: true`, `submitted: false`, and `composer_empty: true`, then visually
 confirm the composer is empty. Do not press Send during this milestone.
+
+## 6. BEL-01B.2a at-most-once submission canary
+
+Use a brand-new isolated ChatGPT tab for the first-turn canary. B.2a intentionally refuses to
+submit into an already-bound conversation.
+
+Write and independently verify a harmless prompt first:
+
+```bash
+node scripts/chrome-extension-client.mjs write_composer_draft '{"tab_id":123,"text":"Reply with exactly: BEL-01B.2 ACK"}'
+
+node scripts/chrome-extension-client.mjs compare_composer_draft '{"tab_id":123,"text":"Reply with exactly: BEL-01B.2 ACK"}'
+```
+
+The comparison must report `exact_match: true`.
+
+Submit once with a unique stable submission ID:
+
+```bash
+node scripts/chrome-extension-client.mjs submit_composer_once '{"tab_id":123,"submission_id":"bel01b2-canary-001","text":"Reply with exactly: BEL-01B.2 ACK"}'
+```
+
+A successful result should report `status: "bound"`, `at_most_once: true`, the original tab ID,
+and a concrete conversation ID/URL.
+
+The extension stores the prompt fingerprint and armed receipt before clicking Send. It does not
+store prompt text in the submission ledger.
+
+Do not automatically retry if submission returns an error after arming. Recover using the same
+submission ID:
+
+```bash
+node scripts/chrome-extension-client.mjs recover_prompt_submission '{"submission_id":"bel01b2-canary-001"}'
+```
+
+Recovery only inspects the original ledger/tab for binding. It cannot resend.
+
+After a successful bound receipt, deliberately call `submit_composer_once` again with the same
+submission_id. BEL-01 must return the existing bound receipt without clicking Send again.
+
+Then deliberately try a second submission ID with the same tab and prompt:
+
+```bash
+node scripts/chrome-extension-client.mjs submit_composer_once '{"tab_id":123,"submission_id":"bel01b2-canary-002","text":"Reply with exactly: BEL-01B.2 ACK"}'
+```
+
+BEL-01 must refuse it as an already tracked tab + prompt identity.
+
+Use `show_chatgpt_tab` for human acceptance and confirm exactly one copy of the user prompt exists.
+B.2a binds the conversation but does not yet reconstruct or return the assistant response; that is
+BEL-01B.2b.
 
 After attachment, reload or navigate that ChatGPT tab and inspect sanitized events:
 
