@@ -127,3 +127,42 @@ test("Chrome extension bridge expires stale commands before extension delivery",
   assert.equal(body.ok, false)
   assert.match(body.error, /expired before extension delivery/)
 })
+
+
+test("Chrome extension bridge event cursor does not replay consumed events", async (t) => {
+  const token = "test-token"
+  const bridge = createBridgeServer({ host: "127.0.0.1", port: 0, token })
+  const bound = await bridge.start()
+  t.after(() => bridge.close())
+
+  for (const tabId of [11, 12]) {
+    const accepted = await fetch(`${bound.url}/extension/event`, {
+      method: "POST",
+      headers: auth(token),
+      body: JSON.stringify({
+        type: "subagent_turn_stream",
+        observation_id: "obs-test",
+        tab_id: tabId,
+        kind: "sse_chunk",
+        data: `event-${tabId}`,
+      }),
+    })
+    assert.equal(accepted.status, 202)
+  }
+
+  const first = await fetch(`${bound.url}/operator/events?after=0`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  const firstBody = await first.json()
+  assert.equal(firstBody.events.length, 2)
+  assert.equal(typeof firstBody.next_sequence, "number")
+  assert.equal(firstBody.events[0].sequence < firstBody.events[1].sequence, true)
+
+  const second = await fetch(
+    `${bound.url}/operator/events?after=${firstBody.next_sequence}`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  )
+  const secondBody = await second.json()
+  assert.deepEqual(secondBody.events, [])
+  assert.equal(secondBody.next_sequence, firstBody.next_sequence)
+})
