@@ -646,6 +646,123 @@ async function handleCommand(command) {
       }
     }
 
+    case "observe_submission_response": {
+      const submissionId = validateSubmissionId(payload.submission_id)
+      const text = validateComposerDraft(payload.text)
+      const waitMs = validateResponseWaitMs(payload.wait_ms)
+      const promptSha256 = await sha256Hex(text)
+      const receipt = await loadSubmissionReceipt(submissionId)
+
+      if (!receipt) {
+        throw new Error(`Unknown submission_id: ${submissionId}`)
+      }
+      if (receipt.status !== "bound") {
+        throw new Error(
+          `submission_id ${submissionId} is ${receipt.status}; a bound submission is required before response observation.`
+        )
+      }
+      if (receipt.prompt_sha256 !== promptSha256) {
+        throw new Error("Response observation prompt does not match the governed submission receipt.")
+      }
+      if (
+        typeof receipt.conversation_id !== "string" ||
+        typeof receipt.conversation_url !== "string"
+      ) {
+        throw new Error("Bound submission receipt is missing conversation identity.")
+      }
+
+      const tab = await requireChatGptTab(receipt.tab_id)
+      if (!attachedTabs.has(tab.id)) {
+        throw new Error(`Tab ${tab.id} is not attached. Run attach first.`)
+      }
+
+      const currentBinding = extractConversationBinding(tab.url)
+      if (
+        !currentBinding ||
+        currentBinding.conversation_id !== receipt.conversation_id
+      ) {
+        throw new Error(
+          "The original child tab is no longer bound to the governed conversation; response observation refused."
+        )
+      }
+
+      const deadline = Date.now() + waitMs
+      while (true) {
+        const snapshot = await evaluateResponseSnapshot(
+          tab.id,
+          receipt.conversation_id,
+          text
+        )
+
+        if (snapshot.status === "completed") {
+          const responseText =
+            typeof snapshot.response === "string" ? snapshot.response : ""
+          const assistantSha256 = await sha256Hex(responseText)
+          const observedAt = new Date().toISOString()
+
+          await saveSubmissionReceipt({
+            ...receipt,
+            response_observed_at: observedAt,
+            assistant_sha256: assistantSha256,
+            assistant_characters: snapshot.response_total_characters,
+            response_truncated: snapshot.response_truncated === true,
+          })
+
+          return {
+            submission_id: submissionId,
+            status: "completed",
+            tab_id: tab.id,
+            conversation_id: receipt.conversation_id,
+            conversation_url: receipt.conversation_url,
+            response: responseText,
+            response_characters: snapshot.response_characters,
+            response_total_characters: snapshot.response_total_characters,
+            response_truncated: snapshot.response_truncated === true,
+            assistant_sha256: assistantSha256,
+            observed_at: observedAt,
+            at_most_once: true,
+          }
+        }
+
+        if (snapshot.status === "binding_mismatch") {
+          throw new Error(
+            `Response binding mismatch (${snapshot.reason ?? "unknown"}); refusing to return unrelated conversation content.`
+          )
+        }
+
+        if (snapshot.status === "protocol_error") {
+          throw new Error(
+            `ChatGPT conversation payload protocol error: ${snapshot.reason ?? "unknown"}`
+          )
+        }
+
+        if (snapshot.status === "fetch_error") {
+          throw new Error(
+            `ChatGPT conversation payload fetch failed with HTTP ${snapshot.http_status ?? "unknown"}.`
+          )
+        }
+
+        if (snapshot.status !== "running") {
+          throw new Error(
+            `Unexpected response observer state: ${String(snapshot.status)}`
+          )
+        }
+
+        if (Date.now() >= deadline) {
+          return {
+            submission_id: submissionId,
+            status: "running",
+            tab_id: tab.id,
+            conversation_id: receipt.conversation_id,
+            conversation_url: receipt.conversation_url,
+            at_most_once: true,
+          }
+        }
+
+        await delay(RESPONSE_POLL_INTERVAL_MS)
+      }
+    }
+
     case "detach": {
       const tab = await requireChatGptTab(payload.tab_id)
       if (attachedTabs.has(tab.id)) {
