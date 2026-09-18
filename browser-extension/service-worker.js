@@ -873,7 +873,11 @@ async function captureConversationPayloadViaReload(tabId, conversationId, timeou
             }
 
             const body = result.base64Encoded
-              ? atob(result.body)
+              ? new TextDecoder().decode(
+                  Uint8Array.from(atob(result.body), (character) =>
+                    character.charCodeAt(0)
+                  )
+                )
               : result.body
 
             try {
