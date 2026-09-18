@@ -6,6 +6,8 @@ const repoRoot = fileURLToPath(new URL("../", import.meta.url))
 const tokenPath = join(repoRoot, ".shellby", "chrome-extension-bridge.token")
 const baseUrl = process.env.BEL01_BRIDGE_URL ?? "http://127.0.0.1:9233"
 const token = (process.env.BEL01_BRIDGE_TOKEN ?? (await readFile(tokenPath, "utf8"))).trim()
+const waitMs = Number.parseInt(process.env.BEL01_BRIDGE_WAIT_MS ?? "60000", 10)
+const pollMs = Number.parseInt(process.env.BEL01_BRIDGE_RESULT_POLL_MS ?? "250", 10)
 
 const [command, payloadSource] = process.argv.slice(2)
 if (!command) {
@@ -20,8 +22,9 @@ const created = await request("/operator/command", {
 })
 const id = created.id
 
-for (let attempt = 0; attempt < 100; attempt += 1) {
-  await new Promise((resolve) => setTimeout(resolve, 200))
+const deadline = Date.now() + waitMs
+while (Date.now() < deadline) {
+  await new Promise((resolve) => setTimeout(resolve, pollMs))
   const response = await fetch(`${baseUrl}/operator/result/${encodeURIComponent(id)}`, {
     headers: { Authorization: `Bearer ${token}` },
   })
@@ -32,7 +35,14 @@ for (let attempt = 0; attempt < 100; attempt += 1) {
   process.exit(result.ok ? 0 : 1)
 }
 
-throw new Error(`Timed out waiting for bridge command ${id}`)
+const health = await fetch(`${baseUrl}/health`, { cache: "no-store" })
+  .then((response) => (response.ok ? response.json() : null))
+  .catch(() => null)
+
+throw new Error(
+  `Timed out waiting for bridge command ${id} after ${waitMs}ms.` +
+    (health ? ` Bridge health: ${JSON.stringify(health)}` : "")
+)
 
 async function request(path, init = {}) {
   const response = await fetch(`${baseUrl}${path}`, {
