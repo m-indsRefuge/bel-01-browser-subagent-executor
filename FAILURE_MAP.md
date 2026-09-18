@@ -35,9 +35,63 @@ Recovery: identify the port owner and use a dedicated BEL-01 Chrome profile and 
 Do not submit a delegated prompt through an ambiguous CDP endpoint.
 
 ## Windows Chrome / WSL boundary
-Status: OPEN — next BEL-01 milestone.
-Risks include Windows Chrome discovery, localhost reachability, CDP binding, profile ownership, path translation, and process lifecycle.
-BEL-01 must prove it is attached to the intended managed Chrome profile before sending a delegated prompt.
+Status: SUPERSEDED FOR BEL-01B POC.
+The dedicated-profile raw-CDP route remains available for future use, but BEL-01B now tests a
+permissioned extension transport inside the user's existing authenticated Chrome profile.
+
+## Existing-profile extension bridge unavailable
+Failure symptom: the extension Options page cannot reach http://127.0.0.1:9233, or operator
+commands remain pending.
+
+Likely causes:
+- the WSL bridge process is not running;
+- Windows-to-WSL localhost forwarding is unavailable;
+- the extension has an incorrect bearer token;
+- extension polling is disabled;
+- Chrome suspended or unloaded the extension service worker.
+
+First diagnostics:
+- GET http://127.0.0.1:9233/health from WSL;
+- use **Test bridge** on the extension Options page;
+- compare the extension token with .shellby/chrome-extension-bridge.token;
+- inspect chrome://extensions for extension/service-worker errors.
+
+Safe recovery:
+Restart the bridge, reload the unpacked extension if needed, verify the token, then retry a
+read-only `ping` or `list_tabs` command.
+
+Do not:
+- bind the bridge to a non-loopback interface during BEL-01B;
+- disable bearer-token authentication;
+- expand the extension to arbitrary sites to work around a ChatGPT-tab validation failure.
+
+## Chrome debugger attachment denied
+Failure symptom: `attach` returns an error from chrome.debugger.
+
+Likely causes:
+- the tab is not a https://chatgpt.com/ tab;
+- another debugger owns the tab;
+- Chrome rejected or detached the debugger session;
+- extension debugger permission is missing.
+
+Safe recovery:
+Verify the target tab URL, detach any competing debugger, and retry deliberately. Do not silently
+switch to a different tab.
+
+## Extension bridge scope escape
+Risk:
+A browser bridge attached to the normal Chrome profile is not a security sandbox. A bug that
+accepts arbitrary tab IDs or URLs could expose unrelated authenticated browsing state.
+
+Current controls:
+- extension host scope includes chatgpt.com and loopback bridge only;
+- all tab operations revalidate the target URL;
+- navigation is restricted to https://chatgpt.com/;
+- there is no generic operator-facing CDP command in BEL-01B;
+- forwarded Network/WebSocket events are sanitized and omit payload contents and headers.
+
+Do not:
+Broaden the command surface or site scope without an explicit BSAP capability decision and tests.
 
 ## Browser protocol drift
 Symptoms include composer discovery failure, prompt binding failure, response reconstruction failure, or CHATGPT_UI_CHANGED.
@@ -55,3 +109,13 @@ Verify Codex source commit, architecture, Rust/Cargo versions, and SHA-256 befor
 - Applicable test suite: PASS
 - Computer Use / Peekaboo: intentionally excluded on WSL
 - Live Windows Chrome integration: not yet accepted
+
+## BEL-01B acceptance target
+- existing-profile extension loads in Chrome;
+- loopback bridge authenticates extension traffic;
+- WSL can `ping` the extension;
+- only ChatGPT tabs are listed;
+- one inactive ChatGPT tab can be created and read;
+- chrome.debugger can attach to that tab;
+- sanitized Network/Page events reach WSL;
+- no prompt is entered or submitted during this milestone.
