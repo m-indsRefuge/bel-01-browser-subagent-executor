@@ -24,6 +24,9 @@ test("audits tool calls made through the HTTP MCP boundary", { timeout: 10_000 }
     async poll(turnId) {
       return { turnId, status: "completed", response: "done" }
     },
+    async resolvePermission() {
+      throw new Error("unused")
+    },
     drainEvents() {
       return []
     },
