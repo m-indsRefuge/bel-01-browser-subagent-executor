@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto"
 
+import { MCP_CONFIG } from "../../config.js"
 import { ChatGptTurnTracker } from "./chatgpt-subagent-protocol.js"
 import { ChatGptSubagentError } from "./chatgpt-subagent-contracts.js"
 import type { AssistantResponseObservation } from "./chatgpt-subagent-observer.js"
@@ -374,7 +375,15 @@ export function createExtensionSubagentTransport(): ChatGptSubagentTransport {
 }
 
 function conversationUrl(conversationId: string): string {
-  return `https://chatgpt.com/c/${encodeURIComponent(conversationId)}`
+  const url = new URL(MCP_CONFIG.chatGpt.projectUrl)
+  const encodedId = encodeURIComponent(conversationId)
+  if (/\/g\/g-p-[^/]+\/project\/?$/.test(url.pathname)) {
+    url.pathname = `${url.pathname.replace(/\/project\/?$/, "")}/c/${encodedId}`
+    url.search = ""
+    url.hash = ""
+    return url.toString()
+  }
+  return `https://chatgpt.com/c/${encodedId}`
 }
 
 function throwIfAborted(signal?: AbortSignal): void {
