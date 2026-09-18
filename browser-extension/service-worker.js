@@ -1,4 +1,5 @@
 import { sanitizeCdpEvent } from "./sanitize.js"
+import { buildComposerInspectionExpression } from "./composer-inspection.js"
 
 const DEBUGGER_PROTOCOL_VERSION = "1.3"
 const CHATGPT_ORIGIN = "https://chatgpt.com/"
@@ -154,7 +155,39 @@ async function handleCommand(command) {
       }
       await chrome.debugger.sendCommand({ tabId: tab.id }, "Network.enable")
       await chrome.debugger.sendCommand({ tabId: tab.id }, "Page.enable")
+      await chrome.debugger.sendCommand({ tabId: tab.id }, "Runtime.enable")
       return { attached_tab_id: tab.id }
+    }
+
+    case "inspect_composer": {
+      const tab = await requireChatGptTab(payload.tab_id)
+      if (!attachedTabs.has(tab.id)) {
+        throw new Error(`Tab ${tab.id} is not attached. Run attach first.`)
+      }
+
+      const evaluation = await chrome.debugger.sendCommand(
+        { tabId: tab.id },
+        "Runtime.evaluate",
+        {
+          expression: buildComposerInspectionExpression(),
+          returnByValue: true,
+          awaitPromise: false,
+          userGesture: false,
+        }
+      )
+
+      if (evaluation.exceptionDetails) {
+        throw new Error("Composer inspection failed inside the page runtime.")
+      }
+
+      return {
+        tab_id: tab.id,
+        ...(evaluation.result?.value ?? {
+          found: false,
+          candidate_count: 0,
+          candidates: [],
+        }),
+      }
     }
 
     case "detach": {
