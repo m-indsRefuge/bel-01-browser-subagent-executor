@@ -115,6 +115,27 @@ Tests:
 Do not:
 Do not broaden CDP event forwarding or reintroduce raw URLs without explicit redaction tests.
 
+## Composer inspection scope creep
+Failure symptom:
+A read-only DOM probe begins returning composer contents, conversation text, arbitrary page DOM,
+or starts mutating/focusing/clicking elements.
+
+Risk:
+The extension could cross from structural detection into content access or interaction before the
+BSAP capability boundary has been explicitly widened.
+
+Current control:
+The BEL-01B `inspect_composer` command requires an explicitly attached ChatGPT tab and returns only
+structural metadata for a small allow-list of composer-shaped selectors. The inspection expression
+does not read textContent, innerText, innerHTML, value, or invoke click/focus/dispatchEvent.
+
+Tests:
+- test/chrome-extension-composer-inspection.test.ts
+
+Do not:
+Do not add typing, submission, arbitrary DOM queries, or conversation-text extraction to this
+milestone.
+
 ## Browser protocol drift
 Symptoms include composer discovery failure, prompt binding failure, response reconstruction failure, or CHATGPT_UI_CHANGED.
 Do not automatically resend an uncertain prompt.
