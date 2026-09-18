@@ -128,6 +128,46 @@ test("completed first-turn payload returns only the bound assistant response", (
   })
 })
 
+
+test("wrapped conversation payload resolves structurally", () => {
+  const result = analyzeConversationPayload(
+    {
+      data: {
+        conversation: conversationPayload(),
+      },
+    },
+    CONVERSATION_ID,
+    PROMPT
+  )
+
+  assert.deepEqual(result, {
+    status: "completed",
+    conversation_id: CONVERSATION_ID,
+    user_turn_count: 1,
+    assistant_status: "finished_successfully",
+    response: "BEL-01B.2 ACK",
+    response_characters: 13,
+    response_total_characters: 13,
+    response_truncated: false,
+  })
+})
+
+test("multiple structural conversation candidates fail closed", () => {
+  const payload = conversationPayload()
+  const result = analyzeConversationPayload(
+    {
+      first: payload,
+      second: payload,
+    },
+    CONVERSATION_ID,
+    PROMPT
+  )
+
+  assert.equal(result.status, "protocol_error")
+  assert.equal(result.reason, "conversation payload contains multiple mapping/current_node objects")
+  assert.equal(result.candidate_count, 2)
+})
+
 test("unfinished assistant response remains running", () => {
   const result = analyzeConversationPayload(
     conversationPayload({ assistantEndTurn: false, assistantText: "partial" }),
@@ -198,7 +238,8 @@ test("protocol shape failure is explicit", () => {
   )
 
   assert.equal(result.status, "protocol_error")
-  assert.equal(result.reason, "conversation payload is missing mapping/current_node")
+  assert.equal(result.reason, "conversation payload contains no unique mapping/current_node object")
+  assert.equal(result.candidate_count, 0)
 })
 
 test("service worker captures ChatGPT-owned payload by CDP reload, not synthetic fetch", async () => {
