@@ -231,6 +231,10 @@ export function createExtensionSubagentTransport(): ChatGptSubagentTransport {
           rejectResponse = reject
         }
       )
+      // The observation can be disposed before submitAgentTurn transfers ownership
+      // of this promise to waitForTurnResponse(). Mark rejections as handled now
+      // without changing the original promise's eventual state for its real consumer.
+      void response.catch(() => undefined)
 
       const disarm = async (): Promise<void> => {
         await bridge
