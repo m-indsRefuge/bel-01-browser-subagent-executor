@@ -15,8 +15,9 @@ import {
   validateSubmissionId,
 } from "./submission.js"
 import {
-  RESPONSE_POLL_INTERVAL_MS,
-  buildConversationSnapshotExpression,
+  RESPONSE_CAPTURE_TIMEOUT_MS,
+  analyzeConversationPayload,
+  isConversationPayloadUrl,
   validateResponseWaitMs,
 } from "./response-observer.js"
 
@@ -686,80 +687,74 @@ async function handleCommand(command) {
         )
       }
 
-      const deadline = Date.now() + waitMs
-      while (true) {
-        const snapshot = await evaluateResponseSnapshot(
-          tab.id,
-          receipt.conversation_id,
-          text
+      if (waitMs > 0) await delay(waitMs)
+
+      const payloadSnapshot = await captureConversationPayloadViaReload(
+        tab.id,
+        receipt.conversation_id,
+        RESPONSE_CAPTURE_TIMEOUT_MS
+      )
+      const snapshot = analyzeConversationPayload(
+        payloadSnapshot,
+        receipt.conversation_id,
+        text
+      )
+
+      if (snapshot.status === "completed") {
+        const responseText =
+          typeof snapshot.response === "string" ? snapshot.response : ""
+        const responseSha256 = await sha256Hex(responseText)
+        const observedAt = new Date().toISOString()
+
+        await saveSubmissionReceipt({
+          ...receipt,
+          response_observed_at: observedAt,
+          response_sha256: responseSha256,
+          response_total_characters: snapshot.response_total_characters,
+          response_truncated: snapshot.response_truncated === true,
+        })
+
+        return {
+          submission_id: submissionId,
+          status: "completed",
+          tab_id: tab.id,
+          conversation_id: receipt.conversation_id,
+          conversation_url: receipt.conversation_url,
+          response: responseText,
+          response_characters: snapshot.response_characters,
+          response_total_characters: snapshot.response_total_characters,
+          response_truncated: snapshot.response_truncated === true,
+          response_sha256: responseSha256,
+          observed_at: observedAt,
+          at_most_once: true,
+        }
+      }
+
+      if (snapshot.status === "binding_mismatch") {
+        throw new Error(
+          `Response binding mismatch (${snapshot.reason ?? "unknown"}); refusing to return unrelated conversation content.`
         )
+      }
 
-        if (snapshot.status === "completed") {
-          const responseText =
-            typeof snapshot.response === "string" ? snapshot.response : ""
-          const responseSha256 = await sha256Hex(responseText)
-          const observedAt = new Date().toISOString()
+      if (snapshot.status === "protocol_error") {
+        throw new Error(
+          `ChatGPT conversation payload protocol error: ${snapshot.reason ?? "unknown"}`
+        )
+      }
 
-          await saveSubmissionReceipt({
-            ...receipt,
-            response_observed_at: observedAt,
-            response_sha256: responseSha256,
-            response_total_characters: snapshot.response_total_characters,
-            response_truncated: snapshot.response_truncated === true,
-          })
+      if (snapshot.status !== "running") {
+        throw new Error(
+          `Unexpected response observer state: ${String(snapshot.status)}`
+        )
+      }
 
-          return {
-            submission_id: submissionId,
-            status: "completed",
-            tab_id: tab.id,
-            conversation_id: receipt.conversation_id,
-            conversation_url: receipt.conversation_url,
-            response: responseText,
-            response_characters: snapshot.response_characters,
-            response_total_characters: snapshot.response_total_characters,
-            response_truncated: snapshot.response_truncated === true,
-            response_sha256: responseSha256,
-            observed_at: observedAt,
-            at_most_once: true,
-          }
-        }
-
-        if (snapshot.status === "binding_mismatch") {
-          throw new Error(
-            `Response binding mismatch (${snapshot.reason ?? "unknown"}); refusing to return unrelated conversation content.`
-          )
-        }
-
-        if (snapshot.status === "protocol_error") {
-          throw new Error(
-            `ChatGPT conversation payload protocol error: ${snapshot.reason ?? "unknown"}`
-          )
-        }
-
-        if (snapshot.status === "fetch_error") {
-          throw new Error(
-            `ChatGPT conversation payload fetch failed with HTTP ${snapshot.http_status ?? "unknown"}.`
-          )
-        }
-
-        if (snapshot.status !== "running") {
-          throw new Error(
-            `Unexpected response observer state: ${String(snapshot.status)}`
-          )
-        }
-
-        if (Date.now() >= deadline) {
-          return {
-            submission_id: submissionId,
-            status: "running",
-            tab_id: tab.id,
-            conversation_id: receipt.conversation_id,
-            conversation_url: receipt.conversation_url,
-            at_most_once: true,
-          }
-        }
-
-        await delay(RESPONSE_POLL_INTERVAL_MS)
+      return {
+        submission_id: submissionId,
+        status: "running",
+        tab_id: tab.id,
+        conversation_id: receipt.conversation_id,
+        conversation_url: receipt.conversation_url,
+        at_most_once: true,
       }
     }
 
@@ -806,31 +801,108 @@ async function evaluateDraftComparison(tabId, expectedText) {
   }
 }
 
-async function evaluateResponseSnapshot(tabId, conversationId, expectedPrompt) {
-  const evaluation = await chrome.debugger.sendCommand(
-    { tabId },
-    "Runtime.evaluate",
-    {
-      expression: buildConversationSnapshotExpression(conversationId, expectedPrompt),
-      returnByValue: true,
-      awaitPromise: true,
-      userGesture: false,
+async function captureConversationPayloadViaReload(tabId, conversationId, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    let settled = false
+    let targetRequestId
+    let timer
+
+    const cleanup = () => {
+      chrome.debugger.onEvent.removeListener(onEvent)
+      if (timer) clearTimeout(timer)
     }
-  )
 
-  if (evaluation.exceptionDetails) {
-    const message =
-      evaluation.exceptionDetails.exception?.description ??
-      evaluation.exceptionDetails.text ??
-      "Response observation failed inside the page runtime."
-    throw new Error(message)
-  }
+    const fail = (error) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      reject(error instanceof Error ? error : new Error(String(error)))
+    }
 
-  const value = evaluation.result?.value
-  if (!value || typeof value !== "object" || typeof value.status !== "string") {
-    throw new Error("Response observer returned an invalid snapshot.")
-  }
-  return value
+    const succeed = (payload) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      resolve(payload)
+    }
+
+    const onEvent = (source, method, params) => {
+      if (settled || source.tabId !== tabId) return
+
+      if (method === "Network.responseReceived") {
+        const responseUrl = params?.response?.url
+        if (!isConversationPayloadUrl(responseUrl, conversationId)) return
+
+        const status = params?.response?.status
+        if (status !== 200) {
+          fail(
+            new Error(
+              `ChatGPT-owned conversation request returned HTTP ${String(status ?? "unknown")}.`
+            )
+          )
+          return
+        }
+
+        targetRequestId = params.requestId
+        return
+      }
+
+      if (
+        method === "Network.loadingFailed" &&
+        targetRequestId &&
+        params?.requestId === targetRequestId
+      ) {
+        fail(new Error("ChatGPT-owned conversation payload request failed during reload."))
+        return
+      }
+
+      if (
+        method === "Network.loadingFinished" &&
+        targetRequestId &&
+        params?.requestId === targetRequestId
+      ) {
+        void chrome.debugger
+          .sendCommand(
+            { tabId },
+            "Network.getResponseBody",
+            { requestId: targetRequestId }
+          )
+          .then((result) => {
+            if (typeof result?.body !== "string") {
+              throw new Error("ChatGPT conversation response body was unavailable.")
+            }
+
+            const body = result.base64Encoded
+              ? atob(result.body)
+              : result.body
+
+            try {
+              succeed(JSON.parse(body))
+            } catch {
+              fail(new Error("ChatGPT conversation response body was not valid JSON."))
+            }
+          })
+          .catch(fail)
+      }
+    }
+
+    chrome.debugger.onEvent.addListener(onEvent)
+    timer = setTimeout(() => {
+      fail(
+        new Error(
+          `Timed out after ${timeoutMs} ms waiting for ChatGPT's own conversation payload during reload.`
+        )
+      )
+    }, timeoutMs)
+
+    void chrome.debugger
+      .sendCommand(
+        { tabId },
+        "Page.reload",
+        { ignoreCache: false }
+      )
+      .catch(fail)
+  })
 }
 
 async function sha256Hex(text) {
