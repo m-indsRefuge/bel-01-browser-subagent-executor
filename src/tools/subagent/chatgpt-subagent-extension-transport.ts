@@ -16,6 +16,8 @@ import {
 } from "./extension-bridge-client.js"
 
 const EVENT_WAIT_MS = 20_000
+const CHATGPT_READY_TIMEOUT_MS = 120_000
+const CHATGPT_READY_POLL_MS = 200
 
 interface ExtensionTab {
   id?: number
@@ -145,23 +147,51 @@ export function createExtensionSubagentTransport(): ChatGptSubagentTransport {
     async ensureReady(page, signal) {
       throwIfAborted(signal)
       const managed = unwrap(page)
-      await refresh(managed)
-      await attach(managed)
       const bridge = await client()
-      const inspection = await bridge.command<{
-        found?: boolean
-        candidate_count?: number
-      }>("inspect_composer", { tab_id: managed.tabId })
+      const deadline = Date.now() + CHATGPT_READY_TIMEOUT_MS
+      let lastError: unknown
 
-      if (inspection.found !== true || inspection.candidate_count !== 2) {
-        if (inspection.found !== true) {
-          throw new ChatGptSubagentError(
-            "CHATGPT_UI_CHANGED",
-            "BEL-01 extension could not identify the ChatGPT composer."
-          )
+      while (Date.now() < deadline) {
+        throwIfAborted(signal)
+        try {
+          await refresh(managed)
+
+          const currentUrl = new URL(managed.url())
+          if (/\/auth\/(login|signin)/i.test(currentUrl.pathname)) {
+            throw new ChatGptSubagentError(
+              "CHATGPT_NOT_AUTHENTICATED",
+              "The BEL-01 Chrome profile is not authenticated to ChatGPT."
+            )
+          }
+
+          await attach(managed)
+          const inspection = await bridge.command<{
+            found?: boolean
+            candidate_count?: number
+          }>("inspect_composer", { tab_id: managed.tabId })
+
+          if (inspection.found === true) {
+            throwIfAborted(signal)
+            return
+          }
+        } catch (error) {
+          if (
+            error instanceof ChatGptSubagentError &&
+            error.code === "CHATGPT_NOT_AUTHENTICATED"
+          ) {
+            throw error
+          }
+          lastError = error
         }
+
+        await delayWithAbort(CHATGPT_READY_POLL_MS, signal)
       }
-      throwIfAborted(signal)
+
+      throw new ChatGptSubagentError(
+        "CHATGPT_UI_CHANGED",
+        `Could not find the ChatGPT composer within ${CHATGPT_READY_TIMEOUT_MS} ms through the BEL-01 extension transport.`,
+        lastError instanceof Error ? { cause: lastError } : undefined
+      )
     },
 
     async observeAssistantResponse(page, input: ChatGptTurnObservationInput) {
@@ -392,4 +422,34 @@ function throwIfAborted(signal?: AbortSignal): void {
     "REQUEST_ABORTED",
     "The ChatGPT subagent request was cancelled. A submitted turn will not be retried automatically."
   )
+}
+
+
+function delayWithAbort(ms: number, signal?: AbortSignal): Promise<void> {
+  if (!signal) return new Promise((resolve) => setTimeout(resolve, ms))
+  if (signal.aborted) {
+    return Promise.reject(
+      new ChatGptSubagentError(
+        "REQUEST_ABORTED",
+        "The ChatGPT subagent request was cancelled."
+      )
+    )
+  }
+
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort)
+      resolve()
+    }, ms)
+    const onAbort = () => {
+      clearTimeout(timer)
+      reject(
+        new ChatGptSubagentError(
+          "REQUEST_ABORTED",
+          "The ChatGPT subagent request was cancelled."
+        )
+      )
+    }
+    signal.addEventListener("abort", onAbort, { once: true })
+  })
 }
