@@ -1,9 +1,11 @@
 import { sanitizeCdpEvent } from "./sanitize.js"
 import { buildComposerInspectionExpression } from "./composer-inspection.js"
 import {
-  buildComposerDraftClearExpression,
+  DRAFT_STABILIZATION_MS,
   buildComposerDraftCompareExpression,
-  buildComposerDraftWriteExpression,
+  buildComposerDraftPrepareClearExpression,
+  buildComposerDraftPrepareWriteExpression,
+  validateComposerDraft,
 } from "./composer-draft.js"
 
 const DEBUGGER_PROTOCOL_VERSION = "1.3"
@@ -201,32 +203,56 @@ async function handleCommand(command) {
         throw new Error(`Tab ${tab.id} is not attached. Run attach first.`)
       }
 
-      const text = payload.text
-      const evaluation = await chrome.debugger.sendCommand(
+      const text = validateComposerDraft(payload.text)
+      const preparation = await chrome.debugger.sendCommand(
         { tabId: tab.id },
         "Runtime.evaluate",
         {
-          expression: buildComposerDraftWriteExpression(text),
+          expression: buildComposerDraftPrepareWriteExpression(),
           returnByValue: true,
           awaitPromise: false,
           userGesture: false,
         }
       )
 
-      if (evaluation.exceptionDetails) {
+      if (preparation.exceptionDetails) {
         const message =
-          evaluation.exceptionDetails.exception?.description ??
-          evaluation.exceptionDetails.text ??
-          "Composer draft write failed inside the page runtime."
+          preparation.exceptionDetails.exception?.description ??
+          preparation.exceptionDetails.text ??
+          "Composer draft preparation failed inside the page runtime."
         throw new Error(message)
+      }
+
+      const prepared = preparation.result?.value
+      if (!prepared?.focused) {
+        throw new Error("Composer draft preparation did not focus the target editor.")
+      }
+
+      await chrome.debugger.sendCommand(
+        { tabId: tab.id },
+        "Input.insertText",
+        { text }
+      )
+
+      await delay(DRAFT_STABILIZATION_MS)
+
+      const verification = await evaluateDraftComparison(tab.id, text)
+      if (!verification.newline_normalized_match) {
+        throw new Error(
+          "Composer draft was not stable after React reconciliation. Do not retry automatically."
+        )
       }
 
       return {
         tab_id: tab.id,
-        ...(evaluation.result?.value ?? {
-          verified: false,
-          submitted: false,
-        }),
+        mode: "write",
+        selector_hint: verification.selector_hint ?? prepared.selector_hint,
+        tag: verification.tag ?? prepared.tag,
+        characters_written: text.length,
+        composer_empty: false,
+        verified: true,
+        stable_after_ms: DRAFT_STABILIZATION_MS,
+        submitted: false,
       }
     }
 
@@ -236,32 +262,10 @@ async function handleCommand(command) {
         throw new Error(`Tab ${tab.id} is not attached. Run attach first.`)
       }
 
-      const evaluation = await chrome.debugger.sendCommand(
-        { tabId: tab.id },
-        "Runtime.evaluate",
-        {
-          expression: buildComposerDraftCompareExpression(payload.text),
-          returnByValue: true,
-          awaitPromise: false,
-          userGesture: false,
-        }
-      )
-
-      if (evaluation.exceptionDetails) {
-        const message =
-          evaluation.exceptionDetails.exception?.description ??
-          evaluation.exceptionDetails.text ??
-          "Composer draft comparison failed inside the page runtime."
-        throw new Error(message)
-      }
-
+      const text = validateComposerDraft(payload.text)
       return {
         tab_id: tab.id,
-        ...(evaluation.result?.value ?? {
-          exact_match: false,
-          canonical_match: false,
-          submitted: false,
-        }),
+        ...(await evaluateDraftComparison(tab.id, text)),
       }
     }
 
@@ -271,31 +275,95 @@ async function handleCommand(command) {
         throw new Error(`Tab ${tab.id} is not attached. Run attach first.`)
       }
 
-      const evaluation = await chrome.debugger.sendCommand(
+      const text = validateComposerDraft(payload.text)
+      const before = await evaluateDraftComparison(tab.id, text)
+
+      if (before.current_length === 0) {
+        return {
+          tab_id: tab.id,
+          mode: "clear",
+          characters_written: 0,
+          composer_empty: true,
+          already_empty: true,
+          verified: true,
+          stable_after_ms: 0,
+          submitted: false,
+        }
+      }
+
+      if (!before.newline_normalized_match) {
+        throw new Error(
+          "BEL-01B.1 refuses to clear composer content that does not exactly match the expected draft."
+        )
+      }
+
+      const preparation = await chrome.debugger.sendCommand(
         { tabId: tab.id },
         "Runtime.evaluate",
         {
-          expression: buildComposerDraftClearExpression(payload.text),
+          expression: buildComposerDraftPrepareClearExpression(text),
           returnByValue: true,
           awaitPromise: false,
           userGesture: false,
         }
       )
 
-      if (evaluation.exceptionDetails) {
+      if (preparation.exceptionDetails) {
         const message =
-          evaluation.exceptionDetails.exception?.description ??
-          evaluation.exceptionDetails.text ??
-          "Composer draft clear failed inside the page runtime."
+          preparation.exceptionDetails.exception?.description ??
+          preparation.exceptionDetails.text ??
+          "Composer draft clear preparation failed inside the page runtime."
         throw new Error(message)
+      }
+
+      const prepared = preparation.result?.value
+      if (!prepared?.focused || !prepared?.selection_prepared) {
+        throw new Error("Composer draft clear preparation did not preserve the expected selection.")
+      }
+
+      await chrome.debugger.sendCommand(
+        { tabId: tab.id },
+        "Input.dispatchKeyEvent",
+        {
+          type: "rawKeyDown",
+          key: "Backspace",
+          code: "Backspace",
+          windowsVirtualKeyCode: 8,
+          nativeVirtualKeyCode: 8,
+        }
+      )
+      await chrome.debugger.sendCommand(
+        { tabId: tab.id },
+        "Input.dispatchKeyEvent",
+        {
+          type: "keyUp",
+          key: "Backspace",
+          code: "Backspace",
+          windowsVirtualKeyCode: 8,
+          nativeVirtualKeyCode: 8,
+        }
+      )
+
+      await delay(DRAFT_STABILIZATION_MS)
+
+      const after = await evaluateDraftComparison(tab.id, text)
+      if (after.current_length !== 0) {
+        throw new Error(
+          "Composer draft clear was not stable after React reconciliation. Do not retry automatically."
+        )
       }
 
       return {
         tab_id: tab.id,
-        ...(evaluation.result?.value ?? {
-          verified: false,
-          submitted: false,
-        }),
+        mode: "clear",
+        selector_hint: prepared.selector_hint,
+        tag: prepared.tag,
+        characters_written: 0,
+        composer_empty: true,
+        already_empty: false,
+        verified: true,
+        stable_after_ms: DRAFT_STABILIZATION_MS,
+        submitted: false,
       }
     }
 
@@ -310,6 +378,35 @@ async function handleCommand(command) {
 
     default:
       throw new Error(`Unsupported BEL-01 extension command: ${String(command?.type)}`)
+  }
+}
+
+async function evaluateDraftComparison(tabId, expectedText) {
+  const evaluation = await chrome.debugger.sendCommand(
+    { tabId },
+    "Runtime.evaluate",
+    {
+      expression: buildComposerDraftCompareExpression(expectedText),
+      returnByValue: true,
+      awaitPromise: false,
+      userGesture: false,
+    }
+  )
+
+  if (evaluation.exceptionDetails) {
+    const message =
+      evaluation.exceptionDetails.exception?.description ??
+      evaluation.exceptionDetails.text ??
+      "Composer draft comparison failed inside the page runtime."
+    throw new Error(message)
+  }
+
+  return evaluation.result?.value ?? {
+    current_length: -1,
+    exact_match: false,
+    newline_normalized_match: false,
+    canonical_match: false,
+    submitted: false,
   }
 }
 
