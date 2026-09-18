@@ -1,5 +1,9 @@
 import { sanitizeCdpEvent } from "./sanitize.js"
 import { buildComposerInspectionExpression } from "./composer-inspection.js"
+import {
+  buildComposerDraftClearExpression,
+  buildComposerDraftWriteExpression,
+} from "./composer-draft.js"
 
 const DEBUGGER_PROTOCOL_VERSION = "1.3"
 const CHATGPT_ORIGIN = "https://chatgpt.com/"
@@ -186,6 +190,75 @@ async function handleCommand(command) {
           found: false,
           candidate_count: 0,
           candidates: [],
+        }),
+      }
+    }
+
+    case "write_composer_draft": {
+      const tab = await requireChatGptTab(payload.tab_id)
+      if (!attachedTabs.has(tab.id)) {
+        throw new Error(`Tab ${tab.id} is not attached. Run attach first.`)
+      }
+
+      const text = payload.text
+      const evaluation = await chrome.debugger.sendCommand(
+        { tabId: tab.id },
+        "Runtime.evaluate",
+        {
+          expression: buildComposerDraftWriteExpression(text),
+          returnByValue: true,
+          awaitPromise: false,
+          userGesture: false,
+        }
+      )
+
+      if (evaluation.exceptionDetails) {
+        const message =
+          evaluation.exceptionDetails.exception?.description ??
+          evaluation.exceptionDetails.text ??
+          "Composer draft write failed inside the page runtime."
+        throw new Error(message)
+      }
+
+      return {
+        tab_id: tab.id,
+        ...(evaluation.result?.value ?? {
+          verified: false,
+          submitted: false,
+        }),
+      }
+    }
+
+    case "clear_composer_draft": {
+      const tab = await requireChatGptTab(payload.tab_id)
+      if (!attachedTabs.has(tab.id)) {
+        throw new Error(`Tab ${tab.id} is not attached. Run attach first.`)
+      }
+
+      const evaluation = await chrome.debugger.sendCommand(
+        { tabId: tab.id },
+        "Runtime.evaluate",
+        {
+          expression: buildComposerDraftClearExpression(),
+          returnByValue: true,
+          awaitPromise: false,
+          userGesture: false,
+        }
+      )
+
+      if (evaluation.exceptionDetails) {
+        const message =
+          evaluation.exceptionDetails.exception?.description ??
+          evaluation.exceptionDetails.text ??
+          "Composer draft clear failed inside the page runtime."
+        throw new Error(message)
+      }
+
+      return {
+        tab_id: tab.id,
+        ...(evaluation.result?.value ?? {
+          verified: false,
+          submitted: false,
         }),
       }
     }
