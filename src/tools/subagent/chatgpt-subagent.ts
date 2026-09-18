@@ -488,7 +488,12 @@ export function createChatGptSubagentService(): ChatGptSubagentService {
   ): Promise<void> {
     assertNotRateLimited()
     const agent = scope.agents.get(agentId)
-    if (scope.activeOperations.has(agentId)) throw new ChatGptSubagentError("AGENT_BUSY", `Agent ${agentId} already has an active turn.`)
+    if (scope.activeOperations.has(agentId)) {
+      throw new ChatGptSubagentError(
+        "AGENT_BUSY",
+        `Agent ${agentId} already has an active turn.`
+      )
+    }
     if (agent?.status === "uncertain") {
       throw new ChatGptSubagentError(
         "AGENT_BUSY",
@@ -496,8 +501,12 @@ export function createChatGptSubagentService(): ChatGptSubagentService {
       )
     }
     if (agent && agent.status !== "idle") {
-      throw new ChatGptSubagentError("AGENT_BUSY", `Agent ${agentId} is still ${agent.status}.`)
+      throw new ChatGptSubagentError(
+        "AGENT_BUSY",
+        `Agent ${agentId} is still ${agent.status}.`
+      )
     }
+
     assertDelegatedAgentSlotAvailable(parentAgent, scope, agentId)
     const operation: ActiveAgentOperation = { ...callContext }
     scope.activeOperations.set(agentId, operation)
@@ -505,47 +514,21 @@ export function createChatGptSubagentService(): ChatGptSubagentService {
     try {
       const { signal } = callContext
       throwIfAborted(signal)
-      if (!(browser?.isConnected() && context)) {
-        connectPromise ??= (async () => {
-          try {
-            const { chromium } = await import("playwright-core")
-            browser = await chromium.connectOverCDP(MCP_CONFIG.chatGpt.cdpEndpoint, { timeout: CONNECT_TIMEOUT_MS })
-          } catch (error) {
-            throw new ChatGptSubagentError(
-              "BROWSER_UNAVAILABLE",
-              [
-                "ChatGPT agent browser is unavailable.",
-                `Expected an already-running debuggable Chrome instance at ${MCP_CONFIG.chatGpt.cdpEndpoint}.`,
-                "This module is attach-only and will not launch Chrome or choose a Chrome profile.",
-              ].join(" "),
-              { cause: error }
-            )
-          }
-          const [browserContext] = browser.contexts()
-          if (!browserContext) throw new ChatGptSubagentError("BROWSER_UNAVAILABLE", "Connected Chrome instance did not expose a browser context.")
-          context = browserContext
-        })().finally(() => {
-          connectPromise = undefined
-        })
-        await waitForPromise(connectPromise, signal)
-      }
+      await transport.ensureConnected(signal)
 
       if (rateLimitedUntil > 0) {
         if (Date.now() < rateLimitedUntil) return
-        for (const page of context?.pages() ?? []) {
-          if (!isChatGptUrl(page.url())) continue
-          const modal = page.locator(RATE_LIMIT_SELECTOR).first()
-          if (!(await modal.isVisible().catch(() => false))) continue
-          const button = modal.getByRole("button", { name: /got it|okay|ok|close/i }).first()
-          await button.click().catch(() => page.keyboard.press("Escape"))
-          await delay(RATE_LIMIT_DISMISS_SETTLE_MS, signal)
-        }
+        await transport.dismissRateLimit(signal)
+        await delay(RATE_LIMIT_DISMISS_SETTLE_MS, signal)
         rateLimitedUntil = 0
         return
       }
+
       await detectRateLimit()
     } catch (error) {
-      if (scope.activeOperations.get(agentId) === operation) scope.activeOperations.delete(agentId)
+      if (scope.activeOperations.get(agentId) === operation) {
+        scope.activeOperations.delete(agentId)
+      }
       throw error
     }
   }
