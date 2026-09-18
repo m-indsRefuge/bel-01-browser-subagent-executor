@@ -42,7 +42,9 @@ export const MCP_CONFIG = {
     cursorHostExecutable: join(dirname(bundledPeekabooExecutable), "peekaboo-cursor-host"),
   },
   chatGpt: {
+    transport: publicConfig.chatgpt.transport,
     cdpEndpoint: publicConfig.chatgpt.cdp_endpoint,
+    extensionBridgeUrl: publicConfig.chatgpt.extension_bridge_url,
     projectUrl: publicConfig.chatgpt.project_url,
     maxDelegatedAgents: publicConfig.chatgpt.max_delegated_agents,
     defaultPollWaitMs: 30_000,
