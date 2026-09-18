@@ -332,7 +332,10 @@ export function createChatGptSubagentService(): ChatGptSubagentService {
     }
   }
 
-  async function ensureAgentPage(scope: SubagentScope, agent: BrowserAgentState): Promise<Page> {
+  async function ensureAgentPage(
+    scope: SubagentScope,
+    agent: BrowserAgentState
+  ): Promise<ChatGptManagedPage> {
     const signal = scope.activeOperations.get(agent.agentId)?.signal
     throwIfAborted(signal)
     const page = agent.page && !agent.page.isClosed() ? agent.page : undefined
@@ -344,17 +347,18 @@ export function createChatGptSubagentService(): ChatGptSubagentService {
     }
 
     const created = !page
-    const restoredPage = page ?? (await createManagedPage())
+    const restoredPage = page ?? (await createManagedPage(signal))
     try {
-      await navigateChatGptPage(restoredPage, targetUrl, signal)
-      await assertAuthenticated(restoredPage)
+      await transport.navigate(restoredPage, targetUrl, signal)
+      await transport.ensureReady(restoredPage, signal)
       assertAgentPage(restoredPage, agent)
-      await findComposer(restoredPage, signal)
       agent.page = restoredPage
       agent.lastUsedAt = Date.now()
       return restoredPage
     } catch (error) {
-      if (created && !restoredPage.isClosed()) await restoredPage.close().catch(() => undefined)
+      if (created && !restoredPage.isClosed()) {
+        await transport.closePage(restoredPage).catch(() => undefined)
+      }
       throw error
     }
   }
