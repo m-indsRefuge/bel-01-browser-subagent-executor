@@ -20,6 +20,9 @@ test("delivers a completed subagent event on the next MCP response exactly once"
     async poll() {
       throw new Error("unused")
     },
+    async resolvePermission() {
+      throw new Error("unused")
+    },
     drainEvents() {
       const key = getAgentIdentity()?.taskSlug ?? ""
       const pending = events.get(key) ?? []
@@ -77,6 +80,9 @@ test("runs staggered subagents and retrieves turns across MCP client sessions", 
       throw new Error("unused")
     },
     async cloneRun() {
+      throw new Error("unused")
+    },
+    async resolvePermission() {
       throw new Error("unused")
     },
     async poll(turnId) {
