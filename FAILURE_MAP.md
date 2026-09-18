@@ -468,6 +468,35 @@ escapes before Chrome execution.
 Tests:
 - test/chrome-extension-composer-draft.test.ts
 
+## Synthetic conversation fetch rejected with HTTP 401
+Failure symptom:
+The first live BEL-01B.2b observer attempt returned
+`ChatGPT conversation payload fetch failed with HTTP 401.`
+
+Observed during live acceptance:
+The bound B.2a conversation/tab remained valid, but an in-page synthetic
+`fetch("/backend-api/conversations/<id>")` was rejected with HTTP 401.
+
+Cause:
+ChatGPT's own conversation-history request carries authenticated application context that a new
+synthetic page fetch does not necessarily reproduce. Reusing cookies alone is not a sufficient
+assumption for this private endpoint.
+
+Current control:
+BEL-01B.2b no longer synthesizes a conversation API request. It follows Shellby's proven pattern:
+register a temporary CDP network observer, reload the already-bound ChatGPT child tab, capture only
+ChatGPT's own matching `200` conversation response, retrieve that response body through
+`Network.getResponseBody`, then parse it locally.
+
+Safe recovery:
+This failure occurred in a read-only observer path. Do not resubmit the governed prompt. Update the
+observer transport, reload the extension, reattach the original tab, and retry observation against
+the existing submission receipt.
+
+Do not:
+Do not copy private authentication headers, account identifiers, or tokens out of browser traffic to
+make a synthetic request succeed.
+
 ## Response observer binding mismatch
 Failure symptom:
 A response-observation request resolves a conversation payload whose user-turn count, user prompt,
@@ -504,8 +533,10 @@ Risk:
 Guessing around a private protocol change could return partial or unrelated content.
 
 Current control:
-Fetch errors and payload-shape errors are explicit failures. The observer does not fall back to DOM
-scraping, arbitrary CDP response bodies, or broader page extraction.
+BEL-01 captures only ChatGPT's own matching conversation response during a reload of the already
+bound child tab. Non-200 responses, missing bodies, invalid JSON, and payload-shape errors are
+explicit failures. The observer does not fall back to DOM scraping, arbitrary unrelated CDP
+response bodies, or broader page extraction.
 
 Tests:
 - test/chrome-extension-response-observer.test.ts
@@ -520,8 +551,10 @@ The bound conversation contains the governed user prompt but no final visible as
 `end_turn: true`.
 
 Current control:
-The observer returns `status: "running"`. Each command may wait at most 10 seconds and polls at
-250 ms. Repeated observation is read-only and does not submit or mutate the page.
+The observer returns `status: "running"`. The command may optionally wait up to 10 seconds before
+capturing one fresh ChatGPT-owned conversation payload. Repeated observation never submits or
+changes conversation history, though it does reload the already-bound child tab to reproduce
+ChatGPT's authenticated payload request.
 
 Do not:
 Do not treat partial assistant text as a completed response.
