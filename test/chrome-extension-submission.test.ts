@@ -74,8 +74,13 @@ test("service worker persists armed receipt before Send-button click", async () 
     "utf8"
   )
 
-  const armedIndex = source.indexOf("await saveSubmissionReceipt(armed)")
-  const clickIndex = source.indexOf("expression: buildSubmitButtonProbeExpression()")
+  const submitStart = source.indexOf('case "submit_composer_once"')
+  const submitEnd = source.indexOf('case "recover_prompt_submission"', submitStart)
+  assert.ok(submitStart >= 0 && submitEnd > submitStart)
+  const submit = source.slice(submitStart, submitEnd)
+
+  const armedIndex = submit.indexOf("await saveSubmissionReceipt(armed)")
+  const clickIndex = submit.indexOf("expression: buildSubmitButtonProbeExpression()")
 
   assert.ok(armedIndex >= 0)
   assert.ok(clickIndex >= 0)
