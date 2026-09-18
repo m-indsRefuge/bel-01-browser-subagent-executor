@@ -333,21 +333,98 @@ based on visual similarity alone.
 
 ## Accidental prompt submission
 Risk:
-A draft-only capability accidentally sends the message to ChatGPT.
+A draft-only capability accidentally sends the message to ChatGPT, or the B.2 submission capability
+fires outside its explicit at-most-once contract.
 
-Current controls:
+BEL-01B.1 controls:
 - write_composer_draft and clear_composer_draft require an explicitly attached ChatGPT tab;
-- no click, form submit, requestSubmit, KeyboardEvent, Enter-key synthesis, or conversation-submit
-  endpoint is present in the draft mutation expression;
-- the result contract reports `submitted: false`;
-- draft commands return metadata only, never the draft contents.
+- draft mutation contains no Send click, Enter-key submission, form submit, requestSubmit, or
+  conversation-submit endpoint;
+- draft results report `submitted: false`.
+
+BEL-01B.2a controls:
+- submission is available only through `submit_composer_once`;
+- the composer must exactly match the expected prompt;
+- the tab must be fresh and not already bound to a conversation;
+- a persistent armed receipt is stored before any Send-button click;
+- only one visible enabled allow-listed Send button may be clicked;
+- there is no Enter-key fallback;
+- once a submission identity is armed, recovery may inspect state but never resubmit.
 
 Tests:
 - test/chrome-extension-composer-draft.test.ts
+- test/chrome-extension-submission.test.ts
+
+## Duplicate prompt submission after uncertain state
+Failure symptom:
+The operator sees a timeout, worker restart, lost result, or missing conversation binding and
+reissues the same logical prompt.
+
+Risk:
+ChatGPT receives the prompt more than once even though the operator believed the first attempt had
+failed.
+
+Current controls:
+- every submission requires a caller-supplied `submission_id`;
+- the extension persists an armed ledger record before clicking Send;
+- the record stores only the prompt SHA-256 fingerprint, not prompt text;
+- reusing the same submission_id is refused unless it is already safely bound, in which case the
+  existing receipt is returned;
+- using a different submission_id for the same tab + prompt fingerprint is also refused;
+- the ledger is stored in chrome.storage.local so MV3 worker restarts do not erase it;
+- `recover_prompt_submission` can bind or report uncertainty but contains no resend path.
+
+Safe recovery:
+Use `recover_prompt_submission` with the original submission_id. Never invent a replacement
+submission_id for an uncertain prompt.
 
 Do not:
-Do not add any submit mechanism to BEL-01B.1. Submission is a separate milestone and capability
-decision.
+Do not delete or bypass an uncertain ledger receipt merely to retry a submission.
+
+## Send-button ambiguity
+Failure symptom:
+Zero or multiple visible enabled elements match the allow-listed Send-button selectors.
+
+Risk:
+BEL-01 could click the wrong control after a ChatGPT UI change.
+
+Current control:
+`submit_composer_once` refuses unless exactly one visible enabled Send candidate exists. It uses
+only the fixed selectors in browser-extension/submission.js and has no Enter fallback.
+
+Safe recovery:
+Inspect the child tab and update selector tests deliberately. Do not broaden the selector to generic
+buttons or aria labels without evidence.
+
+## Submission clicked but conversation binding missing
+Failure symptom:
+The Send click is observed, but the child tab does not expose a concrete ChatGPT `/c/...`
+conversation URL within SUBMISSION_BIND_TIMEOUT_MS.
+
+Risk:
+The prompt may have been accepted even though BEL-01 cannot yet bind durable conversation identity.
+
+Current control:
+The receipt becomes `uncertain`; automatic resend is forbidden. Recovery only checks the original
+tab for a later conversation binding.
+
+Safe recovery:
+Run `recover_prompt_submission` with the original submission_id. If the original tab disappeared
+or remains unbound, preserve uncertainty and do not retry automatically.
+
+## Submission ledger corruption
+Failure symptom:
+A chrome.storage.local submission record is malformed or missing required identity fields.
+
+Risk:
+Failing open could permit a duplicate prompt submission.
+
+Current control:
+Invalid ledger entries cause submission/recovery to fail closed. BEL-01 does not treat malformed
+state as if no prior submission existed.
+
+Do not:
+Do not clear the ledger automatically on parse/shape errors.
 
 ## Generated Runtime.evaluate escape drift
 Failure symptom:
@@ -413,3 +490,19 @@ Verify Codex source commit, architecture, Rust/Cargo versions, and SHA-256 befor
 - latest TypeScript typecheck against native-clear/show-tab revision: PASS
 
 BEL-01B.1 STATUS: COMPLETE
+
+
+## BEL-01B.2a acceptance target
+- focused submission tests and TypeScript typecheck pass;
+- the hardened bridge is healthy with empty queues before the canary;
+- a fresh isolated ChatGPT child tab is created and attached;
+- a harmless prompt is durably written and independently verified before submission;
+- `submit_composer_once` stores an armed receipt before any click;
+- exactly one allow-listed Send button is clicked once;
+- the command binds the child tab to a concrete ChatGPT conversation URL;
+- repeating the same submission_id returns or refuses without another click;
+- attempting a different submission_id for the same tab + prompt is refused;
+- `recover_prompt_submission` can return the bound receipt without resubmitting;
+- human inspection confirms exactly one user prompt exists in the resulting conversation.
+
+BEL-01B.2b response completion/reconstruction remains out of scope until B.2a is accepted.
