@@ -41,6 +41,7 @@ test("publishes the assembled MCP tool surface", { timeout: 10_000 }, async (t) 
       "shell_close",
       "subagent_run",
       "subagent_result",
+      "subagent_permission",
       "fetch_url",
       "skill_list",
       "skill_load",
