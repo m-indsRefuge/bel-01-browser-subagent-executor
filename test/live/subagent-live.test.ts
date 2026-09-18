@@ -100,9 +100,15 @@ test(
           agents: [{ agent_id: liveAgentId, prompt: firstPrompt }],
         },
       })
-      const firstRunTurn = getRunTurn(toolText(firstRun.content))
+      const firstRunTurn = getStructuredRunTurn(firstRun)
+      artifact.first_run = firstRunTurn
+      t.diagnostic(`Turn 1 start result: ${JSON.stringify(firstRunTurn)}`)
       assert.equal(firstRunTurn.agent_id, liveAgentId)
-      assert.equal(firstRunTurn.status, "running", firstRunTurn.error ?? "subagent_run did not start turn 1")
+      assert.equal(
+        firstRunTurn.status,
+        "running",
+        firstRunTurn.error ?? "subagent_run did not start turn 1"
+      )
       assert.ok(firstRunTurn.turn_id)
       t.diagnostic(`Turn 1 submitted: ${firstRunTurn.turn_id}`)
 
@@ -127,7 +133,7 @@ test(
           agents: [{ agent_id: liveAgentId, prompt: secondPrompt }],
         },
       })
-      const secondRunTurn = getRunTurn(toolText(secondRun.content))
+      const secondRunTurn = getStructuredRunTurn(secondRun)
       assert.equal(secondRunTurn.agent_id, liveAgentId)
       assert.equal(secondRunTurn.status, "running", secondRunTurn.error ?? "subagent_run did not start turn 2")
       assert.ok(secondRunTurn.turn_id)
@@ -164,7 +170,7 @@ test(
           agents: [{ agent_id: liveAgentId, prompt: permissionPrompt }],
         },
       })
-      const permissionRunTurn = getRunTurn(toolText(permissionRun.content))
+      const permissionRunTurn = getStructuredRunTurn(permissionRun)
       assert.equal(permissionRunTurn.agent_id, liveAgentId)
       assert.equal(
         permissionRunTurn.status,
@@ -246,6 +252,36 @@ test(
     }
   }
 )
+
+function getStructuredRunTurn(result: {
+  structuredContent?: unknown
+  content?: unknown
+}): StructuredRunTurn {
+  const structured =
+    result.structuredContent &&
+    typeof result.structuredContent === "object" &&
+    !Array.isArray(result.structuredContent)
+      ? (result.structuredContent as { turns?: unknown })
+      : undefined
+  const first = Array.isArray(structured?.turns) ? structured.turns[0] : undefined
+
+  if (first && typeof first === "object" && !Array.isArray(first)) {
+    const turn = first as Record<string, unknown>
+    if (
+      typeof turn.agent_id === "string" &&
+      (turn.status === "running" || turn.status === "failed")
+    ) {
+      return {
+        agent_id: turn.agent_id,
+        ...(typeof turn.turn_id === "string" ? { turn_id: turn.turn_id } : {}),
+        status: turn.status,
+        ...(typeof turn.error === "string" ? { error: turn.error } : {}),
+      }
+    }
+  }
+
+  return getRunTurn(toolText(result.content))
+}
 
 function getRunTurn(text: string): StructuredRunTurn {
   const match = text.match(
