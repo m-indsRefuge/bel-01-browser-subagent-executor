@@ -647,24 +647,58 @@ export function createChatGptSubagentService(): ChatGptSubagentService {
     if (turn.status !== "running") return
     const scope = scopes.get(turn.parentAgent)
     if (!scope) {
-      failTurn(turn, new ChatGptSubagentError("AGENT_TARGET_LOST", `Agent ${turn.agentId} no longer exists.`))
+      failTurn(
+        turn,
+        new ChatGptSubagentError(
+          "AGENT_TARGET_LOST",
+          `Agent ${turn.agentId} no longer exists.`
+        )
+      )
       return
     }
     const agent = scope.agents.get(turn.agentId)
     if (!agent) {
-      failTurn(turn, new ChatGptSubagentError("AGENT_TARGET_LOST", `Agent ${turn.agentId} no longer exists.`))
+      failTurn(
+        turn,
+        new ChatGptSubagentError(
+          "AGENT_TARGET_LOST",
+          `Agent ${turn.agentId} no longer exists.`
+        )
+      )
       return
     }
+
     const now = Date.now()
     captureConversationUrlFromPage(agent)
-    persistAgent(turn.parentAgent, agent)
     agent.lastCompletedAt = now
     agent.lastUsedAt = now
     agent.status = "idle"
+
+    const requested = parseBsapPermissionRequest(response)
+    if (requested) {
+      const permissionRequest: ChatGptPermissionRequest = {
+        requestId: `${turn.turnId}_permission`,
+        ...requested,
+      }
+      agent.pendingPermission = permissionRequest
+      turn.status = "permission_required"
+      turn.permissionRequest = permissionRequest
+      persistAgent(turn.parentAgent, agent)
+      settleTurn(turn)
+      scope.pendingEvents.push(
+        `agent_permission_request agent_id=${turn.agentId} turn_id=${turn.turnId} request_id=${permissionRequest.requestId} capability=${permissionRequest.capability}`
+      )
+      return
+    }
+
+    agent.pendingPermission = undefined
     turn.status = "completed"
     turn.response = response
+    persistAgent(turn.parentAgent, agent)
     settleTurn(turn)
-    scope.pendingEvents.push(`agent_finished agent_id=${turn.agentId} turn_id=${turn.turnId}`)
+    scope.pendingEvents.push(
+      `agent_finished agent_id=${turn.agentId} turn_id=${turn.turnId}`
+    )
   }
 
   function drainPendingEvents(): string[] {
