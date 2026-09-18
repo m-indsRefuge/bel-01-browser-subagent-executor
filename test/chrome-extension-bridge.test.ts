@@ -34,6 +34,8 @@ test("Chrome extension bridge requires auth and round-trips commands", async (t)
   assert.equal(command.type, "list_tabs")
   assert.deepEqual(command.payload, {})
   assert.equal(typeof command.created_at, "string")
+  assert.equal(typeof command.expires_at, "string")
+  assert.ok(Date.parse(command.expires_at) > Date.parse(command.created_at))
 })
 
 test("Chrome extension bridge stores results and event envelopes", async (t) => {
@@ -88,3 +90,40 @@ function auth(token: string) {
     "Content-Type": "application/json",
   }
 }
+
+
+test("Chrome extension bridge expires stale commands before extension delivery", async (t) => {
+  const token = "test-token"
+  const bridge = createBridgeServer({
+    host: "127.0.0.1",
+    port: 0,
+    token,
+    commandTtlMs: 5,
+    longPollMs: 5,
+  })
+  const bound = await bridge.start()
+  t.after(() => bridge.close())
+
+  const created = await fetch(`${bound.url}/operator/command`, {
+    method: "POST",
+    headers: auth(token),
+    body: JSON.stringify({ type: "write_composer_draft", payload: { tab_id: 1, text: "canary" } }),
+  })
+  const { id } = await created.json()
+
+  await new Promise((resolve) => setTimeout(resolve, 15))
+
+  const next = await fetch(`${bound.url}/extension/next?client_id=test-extension`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  assert.equal(next.status, 204)
+
+  const result = await fetch(`${bound.url}/operator/result/${id}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  assert.equal(result.status, 200)
+
+  const body = await result.json()
+  assert.equal(body.ok, false)
+  assert.match(body.error, /expired before extension delivery/)
+})
