@@ -443,6 +443,17 @@ async function handleCommand(command) {
         )
       }
 
+      const identityMatch = await findSubmissionReceiptByIdentity(tab.id, promptSha256)
+      if (identityMatch) {
+        throw new Error(
+          "This tab and prompt are already tracked by submission_id " +
+            identityMatch.submission_id +
+            " with status " +
+            identityMatch.status +
+            "; refusing a second submission identity."
+        )
+      }
+
       if (extractConversationBinding(tab.url)) {
         throw new Error("BEL-01B.2a requires a fresh ChatGPT child tab with no bound conversation.")
       }
