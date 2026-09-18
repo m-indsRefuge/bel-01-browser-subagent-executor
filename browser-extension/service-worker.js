@@ -7,6 +7,13 @@ import {
   buildComposerDraftPrepareWriteExpression,
   validateComposerDraft,
 } from "./composer-draft.js"
+import {
+  SUBMISSION_BIND_TIMEOUT_MS,
+  buildSubmitButtonClickExpression,
+  extractConversationBinding,
+  submissionStorageKey,
+  validateSubmissionId,
+} from "./submission.js"
 
 const DEBUGGER_PROTOCOL_VERSION = "1.3"
 const CHATGPT_ORIGIN = "https://chatgpt.com/"
