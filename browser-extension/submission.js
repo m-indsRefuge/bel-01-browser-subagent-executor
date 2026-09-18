@@ -21,7 +21,7 @@ export function submissionStorageKey(submissionId) {
   return `${SUBMISSION_LEDGER_PREFIX}${validateSubmissionId(submissionId)}`
 }
 
-export function buildSubmitButtonClickExpression() {
+export function buildSubmitButtonProbeExpression() {
   const selectors = JSON.stringify(SEND_BUTTON_SELECTORS)
 
   return `(() => {
@@ -56,12 +56,16 @@ export function buildSubmitButtonClickExpression() {
     }
 
     const { element, selector } = candidates[0];
-    element.click();
+    const rect = element.getBoundingClientRect();
 
     return {
-      clicked: true,
+      click_ready: true,
       selector_hint: selector,
-      submitted: true,
+      x: rect.left + rect.width / 2,
+      y: rect.top + rect.height / 2,
+      width: rect.width,
+      height: rect.height,
+      submitted: false,
     };
   })()`
 }
