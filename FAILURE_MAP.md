@@ -172,6 +172,22 @@ Do not:
 Do not add typing, submission, arbitrary DOM queries, or conversation-text extraction to this
 milestone.
 
+## Child tab not visible to operator
+Failure symptom:
+BEL-01 successfully creates and controls a ChatGPT child tab, but the operator cannot find or
+visually inspect it.
+
+Cause:
+Child tabs are intentionally created with `active: false`. Chrome may place the inactive tab in a
+different currently open browser window or outside the visible portion of a crowded tab strip.
+
+Current control:
+The explicit `show_chatgpt_tab` command first revalidates the tab as a ChatGPT tab, then activates
+that tab and focuses its owning Chrome window. It does not navigate or submit anything.
+
+Do not:
+Do not scan or activate arbitrary tabs to locate the child.
+
 ## Ephemeral Chrome tab identity
 Failure symptom:
 A command returns `No tab with id: <tab_id>` even though that tab ID was valid earlier in the
@@ -242,6 +258,28 @@ the current composer still exactly matches that expected draft after newline nor
 
 Do not:
 Do not add an overwrite flag or unconditional clear command to this milestone.
+
+## Draft clear selection lost across CDP boundary
+Failure symptom:
+The expected draft compares exactly before clearing, but a DOM-selected Backspace clear does not
+remain empty after the reconciliation delay.
+
+Observed during BEL-01B.1:
+The canary compared exactly at 38/38 characters, but the first clear implementation failed its
+post-clear stability check.
+
+Cause:
+The original clear path created the selection through Runtime.evaluate, then sent Backspace in a
+separate CDP input command. Editor selection/focus state can be altered between those mechanisms.
+
+Current control:
+The clear path still requires an exact expected-draft precheck and validated composer focus, but
+selection and deletion are now both browser-native input operations: platform-appropriate
+Ctrl/Command+A followed by Backspace. The operation then waits for reconciliation and verifies the
+composer is empty.
+
+Do not:
+Do not weaken the exact-draft precheck to compensate for a selection failure.
 
 ## Transient DOM mutation lost to framework reconciliation
 Failure symptom:
