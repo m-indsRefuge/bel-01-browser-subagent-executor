@@ -111,9 +111,11 @@ composer, write a harmless canary without submitting it:
 node scripts/chrome-extension-client.mjs write_composer_draft '{"tab_id":123,"text":"BEL-01B.1 draft canary — do not submit"}'
 ```
 
-A successful result reports metadata only, including `verified: true`, `submitted: false`, and
-the character count. The command refuses a non-empty composer and refuses ambiguous visible editor
-targets.
+The write path validates and focuses one empty visible composer, inserts text through Chrome CDP
+`Input.insertText`, waits 750 ms for application reconciliation, then verifies the draft again.
+A successful result reports metadata only, including `verified: true`, `submitted: false`,
+`stable_after_ms: 750`, and the character count. The command refuses a non-empty composer and
+refuses ambiguous visible editor targets.
 
 Visually confirm the text is present and unsent. Then clear it:
 
@@ -121,8 +123,10 @@ Visually confirm the text is present and unsent. Then clear it:
 node scripts/chrome-extension-client.mjs clear_composer_draft '{"tab_id":123,"text":"BEL-01B.1 draft canary — do not submit"}'
 ```
 
-The clear command requires the same expected draft text and refuses to clear if the composer has
-changed. Confirm `verified: true`, `submitted: false`, and `composer_empty: true`, then visually
+The clear command requires the same expected draft text and refuses to clear changed content. If
+the composer is already empty it returns `already_empty: true` without mutating anything. Otherwise
+it selects the verified draft, sends only a Backspace input event, waits 750 ms, and verifies stable
+emptiness. Confirm `verified: true`, `submitted: false`, and `composer_empty: true`, then visually
 confirm the composer is empty. Do not press Send during this milestone.
 
 After attachment, reload or navigate that ChatGPT tab and inspect sanitized events:
