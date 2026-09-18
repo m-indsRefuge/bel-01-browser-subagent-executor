@@ -207,6 +207,32 @@ the current composer still exactly matches that expected draft after newline nor
 Do not:
 Do not add an overwrite flag or unconditional clear command to this milestone.
 
+## Transient DOM mutation lost to framework reconciliation
+Failure symptom:
+A draft-write command reports immediate success, but a later metadata comparison shows the composer
+is empty.
+
+Observed during BEL-01B.1:
+The first DOM-based write path appeared to succeed immediately, but a later comparison on the same
+tab reported current_length=0 while expected_length=38.
+
+Cause:
+Direct DOM/editor mutation can diverge from ChatGPT's application state. React may reconcile the
+editor back to its authoritative empty state after the immediate check.
+
+Current control:
+BEL-01B.1 no longer uses direct DOM text mutation for writes. It validates and focuses exactly one
+empty visible composer, uses Chrome CDP Input.insertText, waits DRAFT_STABILIZATION_MS, then performs
+a metadata-only comparison. A write is accepted only if it remains stable after reconciliation.
+
+Clear behavior:
+A clear operation first verifies the exact expected draft. If already empty, it succeeds
+idempotently without mutation. Otherwise it prepares a selection and uses only a Backspace CDP key
+event, then waits and verifies emptiness.
+
+Do not:
+Do not accept immediate DOM equality as proof that the application has adopted the draft state.
+
 ## Composer draft partial mutation / uncertain state
 Failure symptom:
 The browser mutates the composer but subsequent verification fails or Runtime.evaluate returns an
@@ -298,8 +324,9 @@ Verify Codex source commit, architecture, Rust/Cargo versions, and SHA-256 befor
 - focused composer-draft tests and typecheck pass;
 - one fresh isolated ChatGPT tab is attached;
 - exactly one visible editable composer is selected;
-- a canary draft is written without submission;
-- returned metadata reports verified=true and submitted=false;
+- a canary draft is inserted through CDP Input.insertText without submission;
+- the draft remains present after DRAFT_STABILIZATION_MS and verification reports verified=true;
 - human visual inspection confirms the canary is present but unsent;
-- clear_composer_draft removes the canary;
+- clear_composer_draft either clears the exact expected canary or safely reports already_empty=true;
+- clear verification remains stable after DRAFT_STABILIZATION_MS;
 - human visual inspection confirms the composer is empty and no conversation was created.
