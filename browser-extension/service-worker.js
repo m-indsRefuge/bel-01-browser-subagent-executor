@@ -14,6 +14,11 @@ import {
   submissionStorageKey,
   validateSubmissionId,
 } from "./submission.js"
+import {
+  RESPONSE_POLL_INTERVAL_MS,
+  buildConversationSnapshotExpression,
+  validateResponseWaitMs,
+} from "./response-observer.js"
 
 const DEBUGGER_PROTOCOL_VERSION = "1.3"
 const CHATGPT_ORIGIN = "https://chatgpt.com/"
