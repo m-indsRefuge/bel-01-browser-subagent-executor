@@ -806,6 +806,33 @@ async function evaluateDraftComparison(tabId, expectedText) {
   }
 }
 
+async function evaluateResponseSnapshot(tabId, conversationId, expectedPrompt) {
+  const evaluation = await chrome.debugger.sendCommand(
+    { tabId },
+    "Runtime.evaluate",
+    {
+      expression: buildConversationSnapshotExpression(conversationId, expectedPrompt),
+      returnByValue: true,
+      awaitPromise: true,
+      userGesture: false,
+    }
+  )
+
+  if (evaluation.exceptionDetails) {
+    const message =
+      evaluation.exceptionDetails.exception?.description ??
+      evaluation.exceptionDetails.text ??
+      "Response observation failed inside the page runtime."
+    throw new Error(message)
+  }
+
+  const value = evaluation.result?.value
+  if (!value || typeof value !== "object" || typeof value.status !== "string") {
+    throw new Error("Response observer returned an invalid snapshot.")
+  }
+  return value
+}
+
 async function sha256Hex(text) {
   const bytes = new TextEncoder().encode(text)
   const digest = await crypto.subtle.digest("SHA-256", bytes)
