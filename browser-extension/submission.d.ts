@@ -6,7 +6,7 @@ export function validateSubmissionId(value: unknown): string
 
 export function submissionStorageKey(submissionId: string): string
 
-export function buildSubmitButtonClickExpression(): string
+export function buildSubmitButtonProbeExpression(): string
 
 export function extractConversationBinding(
   value: string
