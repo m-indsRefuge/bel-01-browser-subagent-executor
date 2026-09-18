@@ -136,6 +136,88 @@ Do not:
 Do not add typing, submission, arbitrary DOM queries, or conversation-text extraction to this
 milestone.
 
+## Stale staged extension build
+Failure symptom:
+The WSL repository contains a new allow-listed command but Chrome returns
+`Unsupported BEL-01 extension command`.
+
+Observed during BEL-01B:
+`inspect_composer` was present in WSL source while Chrome was still running the older Windows-staged
+copy of the unpacked extension.
+
+Cause:
+The unpacked extension is staged on the Windows filesystem and Chrome does not automatically reload
+when the WSL source tree changes.
+
+First diagnostics:
+- compare the WSL and Windows-staged service-worker.js files;
+- verify the expected command string exists in both copies;
+- reload the extension in chrome://extensions.
+
+Safe recovery:
+Re-copy browser-extension to the Windows staging directory, reload the unpacked extension, then
+`ping` and explicitly reattach the intended ChatGPT tab because extension reload clears in-memory
+debugger attachment state.
+
+## Composer draft target ambiguity
+Failure symptom:
+More than one or zero visible editable composer candidates are present.
+
+Observed during BEL-01B:
+ChatGPT exposed both a visible contenteditable #prompt-textarea and a hidden zero-size textarea.
+
+Current control:
+BEL-01B.1 ignores hidden/non-editable candidates and refuses to mutate unless exactly one visible
+editable composer remains.
+
+Do not:
+Do not guess which element to write to when target identity is ambiguous.
+
+## Composer draft overwrite
+Failure symptom:
+A draft-write command targets a composer that already contains meaningful user text.
+
+Current control:
+BEL-01B.1 refuses to overwrite a non-empty composer. Empty editor placeholder artifacts such as
+zero-width characters are ignored when deciding whether the composer is meaningfully empty.
+
+Do not:
+Do not add an overwrite flag to this milestone.
+
+## Composer draft partial mutation / uncertain state
+Failure symptom:
+The browser mutates the composer but subsequent verification fails or Runtime.evaluate returns an
+exception after mutation began.
+
+Risk:
+The caller may not know whether some or all draft text is now present.
+
+Current control:
+The command verifies the post-mutation text without returning it. A failed write must not be
+automatically retried. The next action is inspect the same isolated tab and visually confirm state,
+or deliberately clear the composer.
+
+Do not:
+Do not treat a failed write as proof that no mutation occurred.
+
+## Accidental prompt submission
+Risk:
+A draft-only capability accidentally sends the message to ChatGPT.
+
+Current controls:
+- write_composer_draft and clear_composer_draft require an explicitly attached ChatGPT tab;
+- no click, form submit, requestSubmit, KeyboardEvent, Enter-key synthesis, or conversation-submit
+  endpoint is present in the draft mutation expression;
+- the result contract reports `submitted: false`;
+- draft commands return metadata only, never the draft contents.
+
+Tests:
+- test/chrome-extension-composer-draft.test.ts
+
+Do not:
+Do not add any submit mechanism to BEL-01B.1. Submission is a separate milestone and capability
+decision.
+
 ## Browser protocol drift
 Symptoms include composer discovery failure, prompt binding failure, response reconstruction failure, or CHATGPT_UI_CHANGED.
 Do not automatically resend an uncertain prompt.
@@ -153,12 +235,24 @@ Verify Codex source commit, architecture, Rust/Cargo versions, and SHA-256 befor
 - Computer Use / Peekaboo: intentionally excluded on WSL
 - Live Windows Chrome integration: not yet accepted
 
-## BEL-01B acceptance target
-- existing-profile extension loads in Chrome;
-- loopback bridge authenticates extension traffic;
-- WSL can `ping` the extension;
-- only ChatGPT tabs are listed;
-- one inactive ChatGPT tab can be created and read;
-- chrome.debugger can attach to that tab;
-- sanitized Network/Page events reach WSL;
-- no prompt is entered or submitted during this milestone.
+## BEL-01B verification receipt
+- existing-profile extension loads in Chrome: PASS
+- loopback bridge authenticates extension traffic: PASS
+- WSL can `ping` the extension: PASS
+- only ChatGPT tabs are listed: PASS
+- one inactive ChatGPT tab can be created and read: PASS
+- chrome.debugger can attach to that tab: PASS
+- sanitized Network/Page/WebSocket metadata reaches WSL: PASS
+- URL query/identifier leakage hardened with focused tests: PASS
+- read-only composer discovery finds the visible #prompt-textarea and rejects the hidden textarea: PASS
+- no prompt entered or submitted during BEL-01B: PASS
+
+## BEL-01B.1 acceptance target
+- focused composer-draft tests and typecheck pass;
+- one fresh isolated ChatGPT tab is attached;
+- exactly one visible editable composer is selected;
+- a canary draft is written without submission;
+- returned metadata reports verified=true and submitted=false;
+- human visual inspection confirms the canary is present but unsent;
+- clear_composer_draft removes the canary;
+- human visual inspection confirms the composer is empty and no conversation was created.
