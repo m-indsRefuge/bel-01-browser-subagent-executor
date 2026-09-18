@@ -441,6 +441,11 @@ async function handleCommand(command) {
         )
       }
 
+      const tab = await requireChatGptTab(payload.tab_id)
+      if (!attachedTabs.has(tab.id)) {
+        throw new Error(`Tab ${tab.id} is not attached. Run attach first.`)
+      }
+
       const identityMatch = await findSubmissionReceiptByIdentity(tab.id, promptSha256)
       if (identityMatch) {
         throw new Error(
