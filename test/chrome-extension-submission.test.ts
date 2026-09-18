@@ -83,9 +83,13 @@ test("service worker persists armed receipt before Send-button click", async () 
   assert.ok(source.includes("prompt_sha256: promptSha256"))
   assert.ok(source.includes("chrome.storage.local.set"))
   assert.ok(source.includes("refusing duplicate submission"))
+  assert.ok(source.includes("refusing a second submission identity"))
+  assert.ok(source.includes("findSubmissionReceiptByIdentity"))
   assert.ok(source.includes("Use recover_prompt_submission instead."))
   assert.ok(source.includes("waitForConversationBinding"))
   assert.ok(source.includes('status: "submitted_unbound"'))
+  assert.ok(source.includes("const submittedReceipt = {"))
+  assert.ok(source.includes("...submittedReceipt"))
   assert.ok(source.includes('status: "bound"'))
   assert.ok(source.includes('status: "uncertain"'))
 })
@@ -126,4 +130,17 @@ test("recovery path cannot resend", async () => {
 
   assert.ok(recovery.includes("submission was not retried"))
   assert.ok(recovery.includes("no_resubmit: true"))
+})
+
+
+test("ledger identity scan blocks alternate submission ids for the same tab and prompt", async () => {
+  const source = await readFile(
+    new URL("../browser-extension/service-worker.js", import.meta.url),
+    "utf8"
+  )
+
+  assert.ok(source.includes("chrome.storage.local.get(null)"))
+  assert.ok(source.includes('key.startsWith("bel01_submission:")'))
+  assert.ok(source.includes("value.tab_id === tabId && value.prompt_sha256 === promptSha256"))
+  assert.ok(source.includes("already tracked by submission_id"))
 })
