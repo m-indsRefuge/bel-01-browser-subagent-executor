@@ -257,6 +257,11 @@ test("surfaces a BSAP permission request and resumes the same durable child", { 
   )
   t.after(() => client.close())
 
+  await client.callTool({
+    name: "start_here",
+    arguments: { mode: "general", task_id: "subagent-permission" },
+  })
+
   const pending = await client.callTool({
     name: "subagent_result",
     arguments: { turn_ids: ["reviewer_turn_1"], wait_ms: 0 },
