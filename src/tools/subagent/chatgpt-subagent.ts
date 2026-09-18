@@ -330,7 +330,7 @@ export function createChatGptSubagentService(): ChatGptSubagentService {
           lastUsedAt: Date.now(),
           turnCount: persisted.turnCount,
           conversationUrl: persisted.conversationUrl,
-          grants: new Set(persisted.grants),
+          grants: new Set(["reasoning", ...persisted.grants]),
           pendingPermission: persisted.pendingPermission,
         }
         await ensureAgentPage(scope, agent)
