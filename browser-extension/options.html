@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>BEL-01 ChatGPT Bridge</title>
+    <style>
+      body { font-family: system-ui, sans-serif; max-width: 720px; margin: 40px auto; padding: 0 20px; }
+      label { display: block; margin: 16px 0 6px; font-weight: 600; }
+      input[type="text"], input[type="password"] { width: 100%; box-sizing: border-box; padding: 10px; }
+      button { margin-top: 18px; padding: 10px 16px; }
+      #status { margin-top: 16px; white-space: pre-wrap; }
+      .hint { color: #666; font-size: 0.92rem; }
+    </style>
+  </head>
+  <body>
+    <h1>BEL-01 ChatGPT Bridge</h1>
+    <p>
+      This extension only accepts commands from the local BEL-01 bridge and only operates on
+      <code>https://chatgpt.com/</code> tabs.
+    </p>
+
+    <label for="bridgeUrl">Bridge URL</label>
+    <input id="bridgeUrl" type="text" value="http://127.0.0.1:9233" />
+    <div class="hint">Keep this on loopback for the BEL-01B proof of concept.</div>
+
+    <label for="token">Bridge token</label>
+    <input id="token" type="password" autocomplete="off" />
+
+    <label>
+      <input id="enabled" type="checkbox" />
+      Enable BEL-01 bridge polling
+    </label>
+
+    <button id="save" type="button">Save</button>
+    <button id="test" type="button">Test bridge</button>
+
+    <div id="status"></div>
+
+    <script type="module" src="options.js"></script>
+  </body>
+</html>
