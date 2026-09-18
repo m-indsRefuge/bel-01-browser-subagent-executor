@@ -2,6 +2,7 @@ import { sanitizeCdpEvent } from "./sanitize.js"
 import { buildComposerInspectionExpression } from "./composer-inspection.js"
 import {
   buildComposerDraftClearExpression,
+  buildComposerDraftCompareExpression,
   buildComposerDraftWriteExpression,
 } from "./composer-draft.js"
 
@@ -224,6 +225,41 @@ async function handleCommand(command) {
         tab_id: tab.id,
         ...(evaluation.result?.value ?? {
           verified: false,
+          submitted: false,
+        }),
+      }
+    }
+
+    case "compare_composer_draft": {
+      const tab = await requireChatGptTab(payload.tab_id)
+      if (!attachedTabs.has(tab.id)) {
+        throw new Error(`Tab ${tab.id} is not attached. Run attach first.`)
+      }
+
+      const evaluation = await chrome.debugger.sendCommand(
+        { tabId: tab.id },
+        "Runtime.evaluate",
+        {
+          expression: buildComposerDraftCompareExpression(payload.text),
+          returnByValue: true,
+          awaitPromise: false,
+          userGesture: false,
+        }
+      )
+
+      if (evaluation.exceptionDetails) {
+        const message =
+          evaluation.exceptionDetails.exception?.description ??
+          evaluation.exceptionDetails.text ??
+          "Composer draft comparison failed inside the page runtime."
+        throw new Error(message)
+      }
+
+      return {
+        tab_id: tab.id,
+        ...(evaluation.result?.value ?? {
+          exact_match: false,
+          canonical_match: false,
           submitted: false,
         }),
       }
