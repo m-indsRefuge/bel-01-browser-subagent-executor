@@ -192,3 +192,98 @@ test("runs staggered subagents and retrieves turns across MCP client sessions", 
   })
   assert.equal(toolText(failedStart), 'turns:\n\n- agent_id=unavailable-agent status=failed error="subagent_failed: browser unavailable"')
 })
+
+
+test("surfaces a BSAP permission request and resumes the same durable child", { timeout: 10_000 }, async (t) => {
+  const decisions: Array<{
+    agentId: string
+    requestId: string
+    decision: "grant" | "deny"
+  }> = []
+
+  const chatGptSubagents: ChatGptSubagentService = {
+    async ask() {
+      return "reviewer_turn_1"
+    },
+    async cloneSelf() {
+      throw new Error("unused")
+    },
+    async cloneRun() {
+      throw new Error("unused")
+    },
+    async poll(turnId) {
+      if (turnId === "reviewer_turn_1") {
+        return {
+          status: "permission_required",
+          permissionRequest: {
+            requestId: "reviewer_turn_1_permission",
+            capability: "web",
+            reason: "Need current upstream documentation",
+            scope: "official documentation only",
+          },
+        }
+      }
+      if (turnId === "reviewer_turn_2") {
+        return {
+          status: "completed",
+          response: "Permission granted; task completed.",
+        }
+      }
+      throw new Error("unknown turn")
+    },
+    async resolvePermission(request) {
+      decisions.push({
+        agentId: request.agentId,
+        requestId: request.requestId,
+        decision: request.decision,
+      })
+      return "reviewer_turn_2"
+    },
+    drainEvents() {
+      return []
+    },
+    async dispose() {},
+  }
+
+  const running = await startMcpHttpServer({ chatGptSubagents })
+  t.after(() => running.close())
+
+  const { client } = await connectClient(
+    running.url,
+    "subagent-permission-client",
+    undefined,
+    false,
+    "permission-session"
+  )
+  t.after(() => client.close())
+
+  const pending = await client.callTool({
+    name: "subagent_result",
+    arguments: { turn_ids: ["reviewer_turn_1"], wait_ms: 0 },
+  })
+  const pendingText = toolText(pending)
+  assert.match(pendingText, /status=permission_required/)
+  assert.match(pendingText, /request_id=reviewer_turn_1_permission/)
+  assert.match(pendingText, /capability=web/)
+  assert.match(pendingText, /Need current upstream documentation/)
+
+  const resumed = await client.callTool({
+    name: "subagent_permission",
+    arguments: {
+      agent_id: "reviewer",
+      request_id: "reviewer_turn_1_permission",
+      decision: "grant",
+    },
+  })
+  assert.match(toolText(resumed), /agent_id=reviewer/)
+  assert.match(toolText(resumed), /turn_id=reviewer_turn_2/)
+  assert.match(toolText(resumed), /status=running/)
+
+  assert.deepEqual(decisions, [
+    {
+      agentId: "reviewer",
+      requestId: "reviewer_turn_1_permission",
+      decision: "grant",
+    },
+  ])
+})
