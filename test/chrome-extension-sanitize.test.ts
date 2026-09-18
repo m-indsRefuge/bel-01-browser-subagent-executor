@@ -1,7 +1,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-// @ts-expect-error plain browser ESM module has no declaration file.
 import { sanitizeCdpEvent, sanitizeUrl } from "../browser-extension/sanitize.js"
 
 test("Chrome bridge sanitizer strips query strings, fragments, and identifier-like path segments", () => {
