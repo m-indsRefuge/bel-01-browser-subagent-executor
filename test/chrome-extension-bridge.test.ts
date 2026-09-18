@@ -29,15 +29,14 @@ test("Chrome extension bridge requires auth and round-trips commands", async (t)
     headers: { Authorization: `Bearer ${token}` },
   })
   assert.equal(next.status, 200)
-  assert.deepEqual(await next.json(), {
-    id,
-    type: "list_tabs",
-    payload: {},
-    created_at: assert.match.string,
-  })
+  const command = await next.json()
+  assert.equal(command.id, id)
+  assert.equal(command.type, "list_tabs")
+  assert.deepEqual(command.payload, {})
+  assert.equal(typeof command.created_at, "string")
 })
 
-test("Chrome extension bridge stores results and sanitized event envelopes", async (t) => {
+test("Chrome extension bridge stores results and event envelopes", async (t) => {
   const token = "test-token"
   const bridge = createBridgeServer({ host: "127.0.0.1", port: 0, token })
   const bound = await bridge.start()
