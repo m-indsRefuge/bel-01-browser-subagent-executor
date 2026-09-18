@@ -532,3 +532,21 @@ BEL-01B.1 STATUS: COMPLETE
 - human inspection confirms exactly one user prompt exists in the resulting conversation.
 
 BEL-01B.2b response completion/reconstruction remains out of scope until B.2a is accepted.
+
+
+## BEL-01B.2a live acceptance receipt
+- focused submission tests: PASS
+- TypeScript typecheck: PASS
+- full regression suite: PASS
+- fresh child tab created and attached: PASS
+- canary draft independently verified exact at 33/33 characters before submission: PASS
+- `submit_composer_once` returned `status: "bound"`: PASS
+- bound receipt returned a concrete ChatGPT conversation ID and URL: PASS
+- `at_most_once: true` returned by the live submission receipt: PASS
+- human visual inspection confirms exactly one user prompt is present in the resulting conversation: PASS
+- human visual inspection confirms an assistant response is present beneath that user prompt: PASS
+
+Still to record explicitly before formal BEL-01B.2a closure:
+- same submission_id replay returns the existing bound receipt without another Send;
+- a second first-turn submission identity on the same child tab is refused;
+- `recover_prompt_submission` returns the bound receipt without resubmitting.
