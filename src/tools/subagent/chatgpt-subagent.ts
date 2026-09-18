@@ -261,25 +261,34 @@ export function createChatGptSubagentService(): ChatGptSubagentService {
         settle: settlement.resolve,
       }
 
-      observation = await observeAssistantResponse(page, {
+      observation = await transport.observeAssistantResponse(page, {
         prompt: submittedPrompt,
-        onConversationId: agent.kind === "clone" ? undefined : (conversationId) => bindConversation(parentAgent, agent, conversationId),
+        onConversationId:
+          agent.kind === "clone"
+            ? undefined
+            : (conversationId) => bindConversation(parentAgent, agent, conversationId),
         onActivity: (activity) => {
           if (activity) agent.status = activity
           turn.lastActivityAt = Date.now()
         },
       })
 
-      await dismissBlockingChatGptOverlay(page, signal)
-      const composer = await findComposer(page, signal)
       await delay(INTERACTION_DELAY_MS, signal)
       assertAgentPage(page, agent)
-      await enterPrompt(page, composer, submittedPrompt, signal)
+      await transport.enterPrompt(page, submittedPrompt, signal)
       await delay(INTERACTION_DELAY_MS, signal)
       assertAgentPage(page, agent)
       await delay(SUBMISSION_GRACE_MS, signal)
       await detectRateLimit()
-      await submitComposer(page, composer, signal)
+      await transport.submitTurn(
+        page,
+        {
+          turnId,
+          prompt: submittedPrompt,
+          expectedConversationId: extractConversationId(agent.conversationUrl ?? ""),
+        },
+        signal
+      )
 
       if (agent.status === "idle") agent.status = "Working"
       agent.lastUsedAt = Date.now()
