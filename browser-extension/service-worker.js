@@ -1,3 +1,5 @@
+import { sanitizeCdpEvent } from "./sanitize.js"
+
 const DEBUGGER_PROTOCOL_VERSION = "1.3"
 const CHATGPT_ORIGIN = "https://chatgpt.com/"
 const CHATGPT_PATTERN = "https://chatgpt.com/*"
@@ -35,7 +37,7 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
     type: "cdp_event",
     tab_id: source.tabId,
     method,
-    params: sanitizeEvent(method, params),
+    params: sanitizeCdpEvent(method, params),
   })
 })
 
@@ -223,38 +225,6 @@ async function postEvent(event) {
   }).catch(() => undefined)
 }
 
-function sanitizeEvent(method, params = {}) {
-  switch (method) {
-    case "Network.requestWillBeSent":
-      return {
-        url: params.request?.url,
-        http_method: params.request?.method,
-        resource_type: params.type,
-      }
-    case "Network.responseReceived":
-      return {
-        url: params.response?.url,
-        status: params.response?.status,
-        mime_type: params.response?.mimeType,
-        resource_type: params.type,
-      }
-    case "Network.webSocketCreated":
-      return { url: params.url }
-    case "Network.webSocketFrameReceived":
-    case "Network.webSocketFrameSent":
-      return {
-        opcode: params.response?.opcode,
-        payload_length: typeof params.response?.payloadData === "string" ? params.response.payloadData.length : 0,
-      }
-    case "Page.frameNavigated":
-      return {
-        frame_id: params.frame?.id,
-        url: params.frame?.url,
-      }
-    default:
-      return {}
-  }
-}
 
 async function getConfig() {
   const value = await chrome.storage.local.get({
