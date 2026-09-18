@@ -144,3 +144,24 @@ test("ledger identity scan blocks alternate submission ids for the same tab and 
   assert.ok(source.includes("value.tab_id === tabId && value.prompt_sha256 === promptSha256"))
   assert.ok(source.includes("already tracked by submission_id"))
 })
+
+
+test("bound replay is resolved before live tab validation", async () => {
+  const source = await readFile(
+    new URL("../browser-extension/service-worker.js", import.meta.url),
+    "utf8"
+  )
+
+  const start = source.indexOf('case "submit_composer_once"')
+  const end = source.indexOf('case "recover_prompt_submission"', start)
+  assert.ok(start >= 0 && end > start)
+
+  const submit = source.slice(start, end)
+  const loadIndex = submit.indexOf("loadSubmissionReceipt(submissionId)")
+  const boundReturnIndex = submit.indexOf('if (existing.status === "bound")')
+  const liveTabIndex = submit.indexOf("requireChatGptTab(payload.tab_id)")
+
+  assert.ok(loadIndex >= 0)
+  assert.ok(boundReturnIndex > loadIndex)
+  assert.ok(liveTabIndex > boundReturnIndex)
+})
