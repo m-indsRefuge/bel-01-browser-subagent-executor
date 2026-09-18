@@ -127,12 +127,28 @@ export function createChatGptSubagentService(): ChatGptSubagentService {
           lastUsedAt: Date.now(),
           turnCount: persisted?.turnCount ?? 0,
           conversationUrl: persisted?.conversationUrl,
+          grants: new Set(persisted?.grants ?? request.grants),
+          pendingPermission: persisted?.pendingPermission,
         }
         await ensureAgentPage(scope, agent)
         scope.agents.set(agent.agentId, agent)
       }
+      if (agent.pendingPermission) {
+        throw new ChatGptSubagentError(
+          "AGENT_BUSY",
+          `Agent ${agent.agentId} is waiting for Byte to resolve permission request ${agent.pendingPermission.requestId}.`
+        )
+      }
+
       let submittedPrompt = request.prompt
-      if (agent.turnCount === 0) submittedPrompt = `${request.prompt}\n\n---\n\n${INJECTED_PROMPT}`
+      if (agent.turnCount === 0) {
+        submittedPrompt = [
+          request.prompt,
+          "---",
+          INJECTED_PROMPT,
+          bsapChildPolicy([...agent.grants].sort()),
+        ].join("\n\n")
+      }
       const turnId = await submitAgentTurn(parentAgent, scope, agent, submittedPrompt)
       operationTransferred = true
       return turnId
@@ -184,6 +200,7 @@ export function createChatGptSubagentService(): ChatGptSubagentService {
         page: branchPage,
         lastUsedAt: Date.now(),
         turnCount: 0,
+        grants: new Set(["reasoning"]),
       }
       scope.agents.set(agent.agentId, agent)
 
@@ -223,6 +240,8 @@ export function createChatGptSubagentService(): ChatGptSubagentService {
           lastUsedAt: Date.now(),
           turnCount: persisted.turnCount,
           conversationUrl: persisted.conversationUrl,
+          grants: new Set(persisted.grants),
+          pendingPermission: persisted.pendingPermission,
         }
         await ensureAgentPage(scope, agent)
         scope.agents.set(agent.agentId, agent)
