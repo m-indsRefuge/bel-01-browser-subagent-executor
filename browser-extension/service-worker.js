@@ -886,7 +886,13 @@ async function handleTurnObserverEvent(tabId, method, params) {
       )
       .then((result) => {
         if (typeof result?.bufferedData !== "string" || !result.bufferedData) return
-        return postTurnStreamEvent(tabId, observer, "sse_chunk", decodeBase64Utf8(result.bufferedData))
+        return postTurnStreamEvent(
+          tabId,
+          observer,
+          "sse_chunk",
+          decodeBase64Utf8(result.bufferedData),
+          requestId
+        )
       })
       .catch(() => undefined)
     return
@@ -900,7 +906,13 @@ async function handleTurnObserverEvent(tabId, method, params) {
     ) {
       return
     }
-    await postTurnStreamEvent(tabId, observer, "sse_chunk", decodeBase64Utf8(params.data))
+    await postTurnStreamEvent(
+      tabId,
+      observer,
+      "sse_chunk",
+      decodeBase64Utf8(params.data),
+      params.requestId
+    )
     return
   }
 
@@ -916,7 +928,7 @@ async function handleTurnObserverEvent(tabId, method, params) {
       .then((result) => {
         if (typeof result?.body !== "string" || !result.body) return
         const body = result.base64Encoded ? decodeBase64Utf8(result.body) : result.body
-        return postTurnStreamEvent(tabId, observer, "sse_body", body)
+        return postTurnStreamEvent(tabId, observer, "sse_body", body, requestId)
       })
       .catch(() => undefined)
     return
@@ -930,13 +942,14 @@ async function handleTurnObserverEvent(tabId, method, params) {
   }
 }
 
-async function postTurnStreamEvent(tabId, observer, kind, data) {
+async function postTurnStreamEvent(tabId, observer, kind, data, requestId) {
   if (!data || turnObservers.get(tabId) !== observer) return
   await postEvent({
     type: "subagent_turn_stream",
     observation_id: observer.observation_id,
     tab_id: tabId,
     kind,
+    ...(typeof requestId === "string" ? { request_id: requestId } : {}),
     data,
   })
 }
