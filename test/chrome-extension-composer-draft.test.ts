@@ -98,7 +98,10 @@ test("service worker uses text insertion and backspace only, never Enter or subm
   )
 
   assert.ok(source.includes('"Input.insertText"'))
+  assert.ok(source.includes('key: "a"'))
+  assert.ok(source.includes('code: "KeyA"'))
   assert.ok(source.includes('key: "Backspace"'))
+  assert.ok(source.includes("selectAllModifier"))
   assert.ok(source.includes("DRAFT_STABILIZATION_MS"))
   assert.ok(source.includes("Do not retry automatically"))
 
@@ -113,4 +116,17 @@ test("service worker uses text insertion and backspace only, never Enter or subm
   for (const token of forbidden) {
     assert.equal(source.includes(token), false, `service worker must not contain submission primitive ${token}`)
   }
+})
+
+
+test("service worker can explicitly reveal only a validated ChatGPT child tab", async () => {
+  const source = await readFile(
+    new URL("../browser-extension/service-worker.js", import.meta.url),
+    "utf8"
+  )
+
+  assert.ok(source.includes('case "show_chatgpt_tab"'))
+  assert.ok(source.includes("requireChatGptTab(payload.tab_id)"))
+  assert.ok(source.includes("chrome.tabs.update(tab.id, { active: true })"))
+  assert.ok(source.includes("chrome.windows.update(tab.windowId, { focused: true })"))
 })
