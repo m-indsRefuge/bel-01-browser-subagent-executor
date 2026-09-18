@@ -499,12 +499,13 @@ async function handleCommand(command) {
         }
 
         clicked = true
-        await saveSubmissionReceipt({
+        const submittedReceipt = {
           ...armed,
           status: "submitted_unbound",
           clicked_at: new Date().toISOString(),
           send_selector: clickResult.selector_hint ?? null,
-        })
+        }
+        await saveSubmissionReceipt(submittedReceipt)
 
         const binding = await waitForConversationBinding(tab.id, SUBMISSION_BIND_TIMEOUT_MS)
         if (!binding) {
@@ -515,9 +516,8 @@ async function handleCommand(command) {
         }
 
         const bound = {
-          ...armed,
+          ...submittedReceipt,
           status: "bound",
-          clicked_at: new Date().toISOString(),
           conversation_id: binding.conversation_id,
           conversation_url: binding.conversation_url,
           bound_at: new Date().toISOString(),
