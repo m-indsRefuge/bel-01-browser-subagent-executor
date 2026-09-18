@@ -418,18 +418,16 @@ async function handleCommand(command) {
     }
 
     case "submit_composer_once": {
-      const tab = await requireChatGptTab(payload.tab_id)
-      if (!attachedTabs.has(tab.id)) {
-        throw new Error(`Tab ${tab.id} is not attached. Run attach first.`)
-      }
-
       const submissionId = validateSubmissionId(payload.submission_id)
       const text = validateComposerDraft(payload.text)
       const promptSha256 = await sha256Hex(text)
+      if (!Number.isInteger(payload.tab_id)) {
+        throw new Error("tab_id must be an integer.")
+      }
       const existing = await loadSubmissionReceipt(submissionId)
 
       if (existing) {
-        if (existing.tab_id !== tab.id || existing.prompt_sha256 !== promptSha256) {
+        if (existing.tab_id !== payload.tab_id || existing.prompt_sha256 !== promptSha256) {
           throw new Error(
             `submission_id ${submissionId} is already bound to a different tab or prompt.`
           )
