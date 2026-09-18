@@ -370,7 +370,7 @@ Current controls:
 - the record stores only the prompt SHA-256 fingerprint, not prompt text;
 - reusing the same submission_id is refused unless it is already safely bound, in which case the
   existing receipt is returned;
-- using a different submission_id for the same tab + prompt fingerprint is also refused;
+- after any submission receipt exists, BEL-01B.2a locks that child tab against every second first-turn submission, even under a different submission_id or prompt;
 - the ledger is stored in chrome.storage.local so MV3 worker restarts do not erase it;
 - `recover_prompt_submission` can bind or report uncertainty but contains no resend path.
 
@@ -379,7 +379,8 @@ Use `recover_prompt_submission` with the original submission_id. Never invent a 
 submission_id for an uncertain prompt.
 
 Do not:
-Do not delete or bypass an uncertain ledger receipt merely to retry a submission.
+Do not delete or bypass an uncertain ledger receipt merely to retry a submission. Do not reuse an
+ambiguous child tab for a different first-turn prompt.
 
 ## Send-button ambiguity
 Failure symptom:
@@ -501,7 +502,7 @@ BEL-01B.1 STATUS: COMPLETE
 - exactly one allow-listed Send button is clicked once;
 - the command binds the child tab to a concrete ChatGPT conversation URL;
 - repeating the same submission_id returns or refuses without another click;
-- attempting a different submission_id for the same tab + prompt is refused;
+- attempting any second first-turn submission on the same child tab is refused;
 - `recover_prompt_submission` can return the bound receipt without resubmitting;
 - human inspection confirms exactly one user prompt exists in the resulting conversation.
 
