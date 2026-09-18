@@ -10,11 +10,11 @@ const repoRoot = fileURLToPath(new URL("../", import.meta.url))
 export async function checkPublicRuntime(ngrokEnabled = true) {
   const errors = []
 
-  if (process.platform !== "darwin") {
-    errors.push("This release supports macOS only.")
+  if (process.platform !== "darwin" && process.platform !== "linux") {
+    errors.push("This release supports macOS and Linux/WSL only.")
   }
   if (!isSupportedArchitecture(process.arch)) {
-    errors.push("This release supports Apple Silicon and Intel Macs only.")
+    errors.push("This release supports arm64 and x64 architectures only.")
   }
 
   if (!isSupportedNodeVersion(process.versions.node)) {

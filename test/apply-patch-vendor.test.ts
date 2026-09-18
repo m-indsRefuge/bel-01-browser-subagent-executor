@@ -7,7 +7,14 @@ import { fileURLToPath } from "node:url"
 
 import { tempDir } from "./helpers/temp.js"
 
-const applyPatch = fileURLToPath(new URL("../vendor/apply-patch/apply_patch", import.meta.url))
+const applyPatch = fileURLToPath(
+  new URL(
+    process.platform === "linux" && process.arch === "x64"
+      ? "../vendor/apply-patch/apply_patch-linux-x64"
+      : "../vendor/apply-patch/apply_patch",
+    import.meta.url
+  )
+)
 
 test("executes the vendored apply_patch binary on the host architecture", async (t) => {
   const cwd = await tempDir(t, "apply-patch-vendor-")

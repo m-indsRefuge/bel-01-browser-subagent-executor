@@ -10,7 +10,14 @@ import { tokenPrefix } from "../../tokenizer.js"
 
 const FAILURE_OUTPUT_TOKENS = 1_024
 const STOP_GRACE_MS = 500
-const DEFAULT_APPLY_PATCH_BINARY = fileURLToPath(new URL("../../../vendor/apply-patch/apply_patch", import.meta.url))
+const DEFAULT_APPLY_PATCH_BINARY = fileURLToPath(
+  new URL(
+    process.platform === "linux" && process.arch === "x64"
+      ? "../../../vendor/apply-patch/apply_patch-linux-x64"
+      : "../../../vendor/apply-patch/apply_patch",
+    import.meta.url
+  )
+)
 
 export function registerApplyPatchTool(server: McpServer): void {
   server.registerTool(
