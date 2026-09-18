@@ -32,6 +32,7 @@ for (const limit of [1, 3, 5]) {
         conversationUrl: `https://chatgpt.com/c/agent-${index}`,
         turnCount: index,
         kind: index === 1 ? "clone" : "subagent",
+        grants: ["reasoning"],
       })
     }
     store.close()
@@ -44,7 +45,7 @@ for (const limit of [1, 3, 5]) {
 
     try {
       await assert.rejects(
-        runWithAgent(sessionId, () => service.ask({ agentId: "extra", prompt: "New work", memory: true }, { signal: controller.signal })),
+        runWithAgent(sessionId, () => service.ask({ agentId: "extra", prompt: "New work", memory: true, grants: ["reasoning"] }, { signal: controller.signal })),
         (error: unknown) => error instanceof ChatGptSubagentError && error.code === "AGENT_LIMIT_REACHED" && error.message === expectedMessage
       )
       await assert.rejects(
@@ -57,17 +58,17 @@ for (const limit of [1, 3, 5]) {
         (error: unknown) => error instanceof ChatGptSubagentError && error.code === "AGENT_LIMIT_REACHED" && error.message === expectedMessage
       )
       await assert.rejects(
-        runWithAgent(sessionId, () => service.ask({ agentId: "agent-1", prompt: "Follow up", memory: true }, { signal: controller.signal })),
+        runWithAgent(sessionId, () => service.ask({ agentId: "agent-1", prompt: "Follow up", memory: true, grants: ["reasoning"] }, { signal: controller.signal })),
         (error: unknown) => error instanceof ChatGptSubagentError && error.code === "REQUEST_ABORTED"
       )
       // Other sessions have their own quota, and raising the configured limit opens another slot.
       await assert.rejects(
-        runWithAgent("other-session", () => service.ask({ agentId: "extra", prompt: "New work", memory: true }, { signal: controller.signal })),
+        runWithAgent("other-session", () => service.ask({ agentId: "extra", prompt: "New work", memory: true, grants: ["reasoning"] }, { signal: controller.signal })),
         (error: unknown) => error instanceof ChatGptSubagentError && error.code === "REQUEST_ABORTED"
       )
       MCP_CONFIG.chatGpt.maxDelegatedAgents = limit + 1
       await assert.rejects(
-        runWithAgent(sessionId, () => service.ask({ agentId: "extra", prompt: "New work", memory: true }, { signal: controller.signal })),
+        runWithAgent(sessionId, () => service.ask({ agentId: "extra", prompt: "New work", memory: true, grants: ["reasoning"] }, { signal: controller.signal })),
         (error: unknown) => error instanceof ChatGptSubagentError && error.code === "REQUEST_ABORTED"
       )
     } finally {
