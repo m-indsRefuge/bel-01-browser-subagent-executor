@@ -411,47 +411,45 @@ export function createChatGptSubagentService(): ChatGptSubagentService {
 
   async function recoverSubmittedTurn(turn: BrowserTurnState): Promise<boolean> {
     const agent = scopes.get(turn.parentAgent)?.agents.get(turn.agentId)
-    if (!agent) throw new ChatGptSubagentError("AGENT_TARGET_LOST", `Agent ${turn.agentId} no longer exists.`)
-    const conversationUrl = agent.conversationUrl
-    const conversationId = conversationUrl ? extractConversationId(conversationUrl) : undefined
-    if (!conversationUrl || !conversationId) {
-      throw new ChatGptSubagentError("AGENT_TARGET_LOST", `Agent ${agent.agentId} has no saved conversation to recover.`)
+    if (!agent) {
+      throw new ChatGptSubagentError(
+        "AGENT_TARGET_LOST",
+        `Agent ${turn.agentId} no longer exists.`
+      )
     }
 
+    const conversationUrl = agent.conversationUrl
+    const conversationId = conversationUrl
+      ? extractConversationId(conversationUrl)
+      : undefined
+    if (!conversationUrl || !conversationId) {
+      throw new ChatGptSubagentError(
+        "AGENT_TARGET_LOST",
+        `Agent ${agent.agentId} has no saved conversation to recover.`
+      )
+    }
+
+    if (!transport.recoverSubmittedTurn) return false
+
     const oldPage = agent.page
-    if (oldPage && !oldPage.isClosed() && extractConversationId(oldPage.url()) === conversationId) {
-      const payload = await oldPage
-        .evaluate(async (id) => {
-          const response = await fetch(`/backend-api/conversations/${encodeURIComponent(id)}`)
-          return response.ok ? response.json() : undefined
-        }, conversationId)
-        .catch(() => undefined)
-      const answer = findLatestAssistantAfterPrompt(extractConversationMessages(payload), turn.prompt, agent.turnCount)
-      if (answer) {
-        completeTurn(turn, answer.text)
-        return true
+    const recovered = await transport.recoverSubmittedTurn(
+      oldPage,
+      conversationUrl,
+      turn.prompt,
+      agent.turnCount
+    )
+
+    if (recovered.page && recovered.page !== oldPage) {
+      agent.page = recovered.page
+      agent.lastUsedAt = Date.now()
+      if (oldPage && !oldPage.isClosed()) {
+        await transport.closePage(oldPage).catch(() => undefined)
       }
     }
 
-    const page = await createManagedPage()
-    try {
-      const payload = await navigateAndCaptureConversationPayload(page, conversationUrl)
-      await assertAuthenticated(page)
-      assertAgentPage(page, agent)
-      await findComposer(page)
-
-      agent.page = page
-      agent.lastUsedAt = Date.now()
-      if (oldPage && !oldPage.isClosed()) await oldPage.close().catch(() => undefined)
-
-      const answer = findLatestAssistantAfterPrompt(extractConversationMessages(payload), turn.prompt, agent.turnCount)
-      if (!answer) return false
-      completeTurn(turn, answer.text)
-      return true
-    } catch (error) {
-      if (agent.page !== page && !page.isClosed()) await page.close().catch(() => undefined)
-      throw error
-    }
+    if (!recovered.response) return false
+    completeTurn(turn, recovered.response)
+    return true
   }
 
   async function disposeSubagents(): Promise<void> {
