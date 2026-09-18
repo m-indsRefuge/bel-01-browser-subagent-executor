@@ -439,6 +439,7 @@ export function createChatGptSubagentService(): ChatGptSubagentService {
       response: turn.response,
       errorCode: turn.errorCode,
       errorMessage: turn.errorMessage,
+      permissionRequest: turn.permissionRequest,
     }
   }
 
@@ -768,7 +769,13 @@ export function createChatGptSubagentService(): ChatGptSubagentService {
 
   function persistAgent(parentAgent: AgentIdentity | undefined, agent: BrowserAgentState): void {
     if (!agent.memory || !agent.conversationUrl) return
-    store?.set(parentAgent, agent.agentId, { conversationUrl: agent.conversationUrl, turnCount: agent.turnCount, kind: agent.kind })
+    store?.set(parentAgent, agent.agentId, {
+      conversationUrl: agent.conversationUrl,
+      turnCount: agent.turnCount,
+      kind: agent.kind,
+      grants: [...agent.grants].sort(),
+      pendingPermission: agent.pendingPermission,
+    })
   }
 
   function assertDelegatedAgentSlotAvailable(parentAgent: AgentIdentity | undefined, scope: SubagentScope, requestedAgentId: string): void {
@@ -847,6 +854,7 @@ export function createChatGptSubagentService(): ChatGptSubagentService {
     cloneSelf,
     cloneRun,
     poll: pollSubagent,
+    resolvePermission,
     drainEvents: drainPendingEvents,
     dispose: disposeSubagents,
   }
