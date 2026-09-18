@@ -9,7 +9,7 @@ import {
 } from "./composer-draft.js"
 import {
   SUBMISSION_BIND_TIMEOUT_MS,
-  buildSubmitButtonClickExpression,
+  buildSubmitButtonProbeExpression,
   extractConversationBinding,
   submissionStorageKey,
   validateSubmissionId,
@@ -475,13 +475,13 @@ async function handleCommand(command) {
       }
       await saveSubmissionReceipt(armed)
 
-      let clicked = false
+      let clickAttempted = false
       try {
         const evaluation = await chrome.debugger.sendCommand(
           { tabId: tab.id },
           "Runtime.evaluate",
           {
-            expression: buildSubmitButtonClickExpression(),
+            expression: buildSubmitButtonProbeExpression(),
             returnByValue: true,
             awaitPromise: false,
             userGesture: true,
@@ -496,17 +496,44 @@ async function handleCommand(command) {
           throw new Error(message)
         }
 
-        const clickResult = evaluation.result?.value
-        if (!clickResult?.clicked) {
-          throw new Error("BEL-01B.2a did not receive a positive Send-button click receipt.")
+        const sendTarget = evaluation.result?.value
+        if (
+          !sendTarget?.click_ready ||
+          !Number.isFinite(sendTarget.x) ||
+          !Number.isFinite(sendTarget.y)
+        ) {
+          throw new Error("BEL-01B.2a did not receive a valid Send-button target.")
         }
 
-        clicked = true
+        clickAttempted = true
+        await chrome.debugger.sendCommand(
+          { tabId: tab.id },
+          "Input.dispatchMouseEvent",
+          {
+            type: "mousePressed",
+            x: sendTarget.x,
+            y: sendTarget.y,
+            button: "left",
+            clickCount: 1,
+          }
+        )
+        await chrome.debugger.sendCommand(
+          { tabId: tab.id },
+          "Input.dispatchMouseEvent",
+          {
+            type: "mouseReleased",
+            x: sendTarget.x,
+            y: sendTarget.y,
+            button: "left",
+            clickCount: 1,
+          }
+        )
+
         const submittedReceipt = {
           ...armed,
           status: "submitted_unbound",
           clicked_at: new Date().toISOString(),
-          send_selector: clickResult.selector_hint ?? null,
+          send_selector: sendTarget.selector_hint ?? null,
         }
         await saveSubmissionReceipt(submittedReceipt)
 
@@ -533,7 +560,7 @@ async function handleCommand(command) {
           await saveSubmissionReceipt({
             ...current,
             status: "uncertain",
-            click_observed: clicked,
+            click_attempted: clickAttempted,
             uncertain_at: new Date().toISOString(),
             last_error: error instanceof Error ? error.message : String(error),
           })
@@ -720,7 +747,7 @@ function publicSubmissionReceipt(receipt) {
     armed_at: receipt.armed_at,
     clicked_at: receipt.clicked_at,
     bound_at: receipt.bound_at,
-    click_observed: receipt.click_observed,
+    click_attempted: receipt.click_attempted,
     recovery_checked_at: receipt.recovery_checked_at,
     at_most_once: true,
   }
