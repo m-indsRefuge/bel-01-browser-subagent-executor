@@ -239,7 +239,7 @@ async function handleCommand(command) {
         { tabId: tab.id },
         "Runtime.evaluate",
         {
-          expression: buildComposerDraftClearExpression(),
+          expression: buildComposerDraftClearExpression(payload.text),
           returnByValue: true,
           awaitPromise: false,
           userGesture: false,
