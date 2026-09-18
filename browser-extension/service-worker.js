@@ -643,6 +643,80 @@ async function evaluateDraftComparison(tabId, expectedText) {
   }
 }
 
+async function sha256Hex(text) {
+  const bytes = new TextEncoder().encode(text)
+  const digest = await crypto.subtle.digest("SHA-256", bytes)
+  return [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, "0")).join("")
+}
+
+async function loadSubmissionReceipt(submissionId) {
+  const key = submissionStorageKey(submissionId)
+  const values = await chrome.storage.local.get(key)
+  if (!Object.prototype.hasOwnProperty.call(values, key)) return undefined
+
+  const receipt = values[key]
+  if (
+    !receipt ||
+    typeof receipt !== "object" ||
+    receipt.submission_id !== submissionId ||
+    !Number.isInteger(receipt.tab_id) ||
+    typeof receipt.prompt_sha256 !== "string" ||
+    typeof receipt.status !== "string"
+  ) {
+    throw new Error(`Submission ledger entry ${submissionId} is invalid; refusing fail-open recovery.`)
+  }
+  return receipt
+}
+
+async function saveSubmissionReceipt(receipt) {
+  const submissionId = validateSubmissionId(receipt?.submission_id)
+  if (!Number.isInteger(receipt?.tab_id)) {
+    throw new Error("Submission receipt requires an integer tab_id.")
+  }
+  if (typeof receipt?.prompt_sha256 !== "string" || receipt.prompt_sha256.length !== 64) {
+    throw new Error("Submission receipt requires a SHA-256 prompt fingerprint.")
+  }
+  if (!["armed", "submitted_unbound", "bound", "uncertain"].includes(receipt?.status)) {
+    throw new Error(`Invalid submission receipt status: ${String(receipt?.status)}`)
+  }
+
+  const key = submissionStorageKey(submissionId)
+  await chrome.storage.local.set({ [key]: receipt })
+}
+
+function publicSubmissionReceipt(receipt) {
+  return {
+    submission_id: receipt.submission_id,
+    status: receipt.status,
+    tab_id: receipt.tab_id,
+    conversation_id: receipt.conversation_id,
+    conversation_url: receipt.conversation_url,
+    armed_at: receipt.armed_at,
+    clicked_at: receipt.clicked_at,
+    bound_at: receipt.bound_at,
+    click_observed: receipt.click_observed,
+    recovery_checked_at: receipt.recovery_checked_at,
+    at_most_once: true,
+  }
+}
+
+async function waitForConversationBinding(tabId, timeoutMs) {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    let tab
+    try {
+      tab = await chrome.tabs.get(tabId)
+    } catch {
+      return undefined
+    }
+
+    const binding = tab.url ? extractConversationBinding(tab.url) : undefined
+    if (binding) return binding
+    await delay(100)
+  }
+  return undefined
+}
+
 async function requireChatGptTab(tabId) {
   if (!Number.isInteger(tabId)) throw new Error("tab_id must be an integer.")
   const tab = await chrome.tabs.get(tabId)
