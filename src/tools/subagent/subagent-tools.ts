@@ -20,6 +20,15 @@ const subagentInputSchema = z.object({
     .transform((value) => value.trim())
     .describe("Task or follow-up instruction. Include enough context for the subagent to act."),
   memory: z.boolean().default(true).describe("Allow a new agent to access memory outside its conversation. Turn history is always preserved."),
+  grants: z
+    .array(
+      z
+        .string()
+        .regex(/^[a-z][a-z0-9._:-]{0,63}$/)
+    )
+    .max(32)
+    .default(["reasoning"])
+    .describe("Initial BSAP capability grants for a new child. Existing agents retain their persisted grants."),
 })
 
 const subagentRunResultSchema = z.object({
@@ -29,12 +38,20 @@ const subagentRunResultSchema = z.object({
   error: z.string().optional(),
 })
 
+const permissionRequestSchema = z.object({
+  request_id: z.string(),
+  capability: z.string(),
+  reason: z.string(),
+  scope: z.string().optional(),
+})
+
 const subagentResultSchema = z.object({
   turn_id: z.string(),
   status: chatGptSubagentStatusSchema,
   activity: chatGptSubagentActivitySchema.optional().describe("Current coarse activity while status is running."),
   activity_age_ms: z.int().nonnegative().optional().describe("Time since the last observable subagent progress while status is running."),
   response: z.string().optional(),
+  permission_request: permissionRequestSchema.optional(),
   error: z.string().optional(),
 })
 
@@ -82,6 +99,7 @@ export function registerSubagentTools(server: McpServer, chatGptSubagents: ChatG
               agentId: agent.agent_id,
               prompt: agent.prompt,
               memory: agent.memory,
+              grants: agent.grants,
             },
             { signal: ctx.mcpReq.signal }
           )
@@ -146,6 +164,14 @@ export function registerSubagentTools(server: McpServer, chatGptSubagents: ChatG
               activity: result.activity,
               activity_age_ms: result.activityAgeMs,
               response: result.response,
+              permission_request: result.permissionRequest
+                ? {
+                    request_id: result.permissionRequest.requestId,
+                    capability: result.permissionRequest.capability,
+                    reason: result.permissionRequest.reason,
+                    scope: result.permissionRequest.scope,
+                  }
+                : undefined,
               error:
                 result.status === "failed" ? `${result.errorCode ?? "subagent_failed"}: ${result.errorMessage ?? "ChatGPT subagent turn failed."}` : undefined,
             }
@@ -162,6 +188,70 @@ export function registerSubagentTools(server: McpServer, chatGptSubagents: ChatG
       return {
         structuredContent: { turns: results },
         content: [],
+      }
+    }
+  )
+
+  server.registerTool(
+    "subagent_permission",
+    {
+      description:
+        "Resolve a BSAP permission request from a durable child and resume that same agent conversation.",
+      inputSchema: z.object({
+        agent_id: z
+          .string()
+          .min(1)
+          .max(64)
+          .transform((value) => value.trim()),
+        request_id: z
+          .string()
+          .min(1)
+          .max(128)
+          .transform((value) => value.trim()),
+        decision: z.enum(["grant", "deny"]),
+        note: z.string().max(1_000).optional(),
+      }),
+      outputSchema: z.object({
+        agent_id: z.string(),
+        turn_id: z.string().optional(),
+        status: z.enum(["running", "failed"]),
+        error: z.string().optional(),
+      }),
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true,
+      },
+    },
+    async ({ agent_id, request_id, decision, note }, ctx) => {
+      try {
+        const turnId = await chatGptSubagents.resolvePermission(
+          {
+            agentId: agent_id,
+            requestId: request_id,
+            decision,
+            note,
+          },
+          { signal: ctx.mcpReq.signal }
+        )
+        return {
+          structuredContent: {
+            agent_id,
+            turn_id: turnId,
+            status: "running" as const,
+          },
+          content: [],
+        }
+      } catch (error) {
+        return {
+          structuredContent: {
+            agent_id,
+            status: "failed" as const,
+            error: subagentErrorText(error),
+          },
+          content: [],
+        }
       }
     }
   )
