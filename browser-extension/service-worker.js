@@ -29,6 +29,7 @@ const EVENT_METHODS = new Set([
 
 let pollGeneration = 0
 const attachedTabs = new Set()
+const turnObservers = new Map()
 
 chrome.runtime.onInstalled.addListener(() => {
   chrome.runtime.openOptionsPage().catch(() => undefined)
@@ -43,11 +44,19 @@ chrome.runtime.onMessage.addListener((message) => {
 })
 
 chrome.debugger.onDetach.addListener((source) => {
-  if (source.tabId !== undefined) attachedTabs.delete(source.tabId)
+  if (source.tabId === undefined) return
+  attachedTabs.delete(source.tabId)
+  turnObservers.delete(source.tabId)
 })
 
 chrome.debugger.onEvent.addListener((source, method, params) => {
-  if (source.tabId === undefined || !attachedTabs.has(source.tabId) || !EVENT_METHODS.has(method)) return
+  if (source.tabId === undefined || !attachedTabs.has(source.tabId)) return
+
+  if (turnObservers.has(source.tabId)) {
+    void handleTurnObserverEvent(source.tabId, method, params)
+  }
+
+  if (!EVENT_METHODS.has(method)) return
   void postEvent({
     type: "cdp_event",
     tab_id: source.tabId,
@@ -170,6 +179,7 @@ async function handleCommand(command) {
 
     case "close_tab": {
       const tab = await requireChatGptTab(payload.tab_id)
+      turnObservers.delete(tab.id)
       if (attachedTabs.has(tab.id)) {
         await chrome.debugger.detach({ tabId: tab.id }).catch(() => undefined)
         attachedTabs.delete(tab.id)
@@ -188,6 +198,43 @@ async function handleCommand(command) {
       await chrome.debugger.sendCommand({ tabId: tab.id }, "Page.enable")
       await chrome.debugger.sendCommand({ tabId: tab.id }, "Runtime.enable")
       return { attached_tab_id: tab.id }
+    }
+
+    case "arm_turn_observer": {
+      const tab = await requireChatGptTab(payload.tab_id)
+      if (!attachedTabs.has(tab.id)) {
+        throw new Error(`Tab ${tab.id} is not attached. Run attach first.`)
+      }
+
+      const observationId = validateObservationId(payload.observation_id)
+      if (turnObservers.has(tab.id)) {
+        throw new Error(`Tab ${tab.id} already has an armed turn observer.`)
+      }
+
+      turnObservers.set(tab.id, {
+        observation_id: observationId,
+        request_ids: new Set(),
+      })
+      return {
+        tab_id: tab.id,
+        observation_id: observationId,
+        armed: true,
+      }
+    }
+
+    case "disarm_turn_observer": {
+      const tabId = payload.tab_id
+      if (!Number.isInteger(tabId)) throw new Error("tab_id must be an integer.")
+      const observationId = validateObservationId(payload.observation_id)
+      const observer = turnObservers.get(tabId)
+      if (observer?.observation_id === observationId) {
+        turnObservers.delete(tabId)
+      }
+      return {
+        tab_id: tabId,
+        observation_id: observationId,
+        armed: false,
+      }
     }
 
     case "inspect_composer": {
@@ -643,6 +690,7 @@ async function handleCommand(command) {
 
     case "detach": {
       const tab = await requireChatGptTab(payload.tab_id)
+      turnObservers.delete(tab.id)
       if (attachedTabs.has(tab.id)) {
         await chrome.debugger.detach({ tabId: tab.id })
         attachedTabs.delete(tab.id)
@@ -653,6 +701,117 @@ async function handleCommand(command) {
     default:
       throw new Error(`Unsupported BEL-01 extension command: ${String(command?.type)}`)
   }
+}
+
+async function handleTurnObserverEvent(tabId, method, params) {
+  const observer = turnObservers.get(tabId)
+  if (!observer) return
+
+  if (method === "Network.requestWillBeSent") {
+    if (
+      params?.request?.method === "POST" &&
+      isConversationTurnEndpoint(params?.request?.url) &&
+      typeof params?.requestId === "string"
+    ) {
+      observer.request_ids.add(params.requestId)
+    }
+    return
+  }
+
+  if (method === "Network.responseReceived") {
+    if (!observer.request_ids.has(params?.requestId)) return
+    const requestId = params.requestId
+    await chrome.debugger
+      .sendCommand(
+        { tabId },
+        "Network.streamResourceContent",
+        { requestId }
+      )
+      .then((result) => {
+        if (typeof result?.bufferedData !== "string" || !result.bufferedData) return
+        return postTurnStreamEvent(tabId, observer, "sse_chunk", decodeBase64Utf8(result.bufferedData))
+      })
+      .catch(() => undefined)
+    return
+  }
+
+  if (method === "Network.dataReceived") {
+    if (
+      !observer.request_ids.has(params?.requestId) ||
+      typeof params?.data !== "string" ||
+      !params.data
+    ) {
+      return
+    }
+    await postTurnStreamEvent(tabId, observer, "sse_chunk", decodeBase64Utf8(params.data))
+    return
+  }
+
+  if (method === "Network.loadingFinished") {
+    if (!observer.request_ids.has(params?.requestId)) return
+    const requestId = params.requestId
+    await chrome.debugger
+      .sendCommand(
+        { tabId },
+        "Network.getResponseBody",
+        { requestId }
+      )
+      .then((result) => {
+        if (typeof result?.body !== "string" || !result.body) return
+        const body = result.base64Encoded ? decodeBase64Utf8(result.body) : result.body
+        return postTurnStreamEvent(tabId, observer, "sse_body", body)
+      })
+      .catch(() => undefined)
+    return
+  }
+
+  if (method === "Network.webSocketFrameReceived") {
+    const payloadData = params?.response?.payloadData
+    if (typeof payloadData === "string" && payloadData) {
+      await postTurnStreamEvent(tabId, observer, "ws_frame", payloadData)
+    }
+  }
+}
+
+async function postTurnStreamEvent(tabId, observer, kind, data) {
+  if (!data || turnObservers.get(tabId) !== observer) return
+  await postEvent({
+    type: "subagent_turn_stream",
+    observation_id: observer.observation_id,
+    tab_id: tabId,
+    kind,
+    data,
+  })
+}
+
+function isConversationTurnEndpoint(value) {
+  try {
+    const url = new URL(value)
+    return (
+      url.protocol === "https:" &&
+      url.hostname === "chatgpt.com" &&
+      url.pathname === "/backend-api/f/conversation"
+    )
+  } catch {
+    return false
+  }
+}
+
+function validateObservationId(value) {
+  if (
+    typeof value !== "string" ||
+    value.length < 1 ||
+    value.length > 128 ||
+    !/^[A-Za-z0-9._:-]+$/.test(value)
+  ) {
+    throw new Error("observation_id must be 1-128 safe identifier characters.")
+  }
+  return value
+}
+
+function decodeBase64Utf8(value) {
+  const bytes = Uint8Array.from(atob(value), (character) => character.charCodeAt(0))
+  return new TextDecoder().decode(bytes)
 }
 
 async function evaluateDraftComparison(tabId, expectedText) {
