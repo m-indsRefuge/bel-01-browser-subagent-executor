@@ -1,0 +1,129 @@
+import assert from "node:assert/strict"
+import { readFile } from "node:fs/promises"
+import test from "node:test"
+
+import {
+  SEND_BUTTON_SELECTORS,
+  SUBMISSION_BIND_TIMEOUT_MS,
+  buildSubmitButtonClickExpression,
+  extractConversationBinding,
+  submissionStorageKey,
+  validateSubmissionId,
+} from "../browser-extension/submission.js"
+
+test("submission ids are bounded and deterministic", () => {
+  assert.equal(validateSubmissionId("bel01b2-canary-001"), "bel01b2-canary-001")
+  assert.equal(submissionStorageKey("bel01b2-canary-001"), "bel01_submission:bel01b2-canary-001")
+  assert.throws(() => validateSubmissionId(""), /submission_id/)
+  assert.throws(() => validateSubmissionId("bad id"), /submission_id/)
+  assert.throws(() => validateSubmissionId("x".repeat(129)), /submission_id/)
+})
+
+test("conversation binding accepts only ChatGPT conversation URLs", () => {
+  assert.deepEqual(extractConversationBinding("https://chatgpt.com/c/abc-123?foo=bar#frag"), {
+    conversation_id: "abc-123",
+    conversation_url: "https://chatgpt.com/c/abc-123",
+  })
+
+  assert.deepEqual(
+    extractConversationBinding("https://chatgpt.com/g/g-p-demo/c/conv-456?temporary-chat=false"),
+    {
+      conversation_id: "conv-456",
+      conversation_url: "https://chatgpt.com/g/g-p-demo/c/conv-456",
+    }
+  )
+
+  assert.equal(extractConversationBinding("https://chatgpt.com/"), undefined)
+  assert.equal(extractConversationBinding("https://example.com/c/abc-123"), undefined)
+  assert.equal(extractConversationBinding("https://chatgpt.com/c/web%3Aephemeral"), undefined)
+})
+
+test("submission click expression is a single bounded Send-button action", () => {
+  const expression = buildSubmitButtonClickExpression()
+
+  assert.deepEqual(SEND_BUTTON_SELECTORS, [
+    'button[data-testid="send-button"]',
+    'button[aria-label="Send prompt"]',
+    'button[aria-label="Send"]',
+  ])
+  assert.equal(SUBMISSION_BIND_TIMEOUT_MS, 15_000)
+  assert.ok(expression.includes("candidates.length !== 1"))
+  assert.ok(expression.includes("element.click()"))
+  assert.ok(expression.includes("clicked: true"))
+  assert.ok(expression.includes("submitted: true"))
+
+  const forbidden = [
+    "KeyboardEvent",
+    "dispatchKeyEvent",
+    'key: "Enter"',
+    'code: "Enter"',
+    "requestSubmit",
+    ".submit(",
+    "backend-api/f/conversation",
+  ]
+
+  for (const token of forbidden) {
+    assert.equal(expression.includes(token), false, `submission expression must not contain ${token}`)
+  }
+})
+
+test("service worker persists armed receipt before Send-button click", async () => {
+  const source = await readFile(
+    new URL("../browser-extension/service-worker.js", import.meta.url),
+    "utf8"
+  )
+
+  const armedIndex = source.indexOf("await saveSubmissionReceipt(armed)")
+  const clickIndex = source.indexOf("expression: buildSubmitButtonClickExpression()")
+
+  assert.ok(armedIndex >= 0)
+  assert.ok(clickIndex >= 0)
+  assert.ok(armedIndex < clickIndex, "armed receipt must be durable before click is attempted")
+
+  assert.ok(source.includes("prompt_sha256: promptSha256"))
+  assert.ok(source.includes("chrome.storage.local.set"))
+  assert.ok(source.includes("refusing duplicate submission"))
+  assert.ok(source.includes("Use recover_prompt_submission instead."))
+  assert.ok(source.includes("waitForConversationBinding"))
+  assert.ok(source.includes('status: "submitted_unbound"'))
+  assert.ok(source.includes('status: "bound"'))
+  assert.ok(source.includes('status: "uncertain"'))
+})
+
+test("submission requires exact draft and a fresh unbound child tab", async () => {
+  const source = await readFile(
+    new URL("../browser-extension/service-worker.js", import.meta.url),
+    "utf8"
+  )
+
+  assert.ok(source.includes("if (!comparison.exact_match)"))
+  assert.ok(source.includes("requires the composer to exactly match the expected prompt"))
+  assert.ok(source.includes("requires a fresh ChatGPT child tab with no bound conversation"))
+})
+
+test("recovery path cannot resend", async () => {
+  const source = await readFile(
+    new URL("../browser-extension/service-worker.js", import.meta.url),
+    "utf8"
+  )
+
+  const start = source.indexOf('case "recover_prompt_submission"')
+  const end = source.indexOf('case "detach"', start)
+  assert.ok(start >= 0 && end > start)
+
+  const recovery = source.slice(start, end)
+  const forbidden = [
+    "buildSubmitButtonClickExpression",
+    "Input.insertText",
+    'key: "Enter"',
+    "requestSubmit",
+    ".submit(",
+  ]
+
+  for (const token of forbidden) {
+    assert.equal(recovery.includes(token), false, `recovery must not contain ${token}`)
+  }
+
+  assert.ok(recovery.includes("submission was not retried"))
+  assert.ok(recovery.includes("no_resubmit: true"))
+})
