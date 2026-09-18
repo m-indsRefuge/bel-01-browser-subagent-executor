@@ -181,8 +181,39 @@ node scripts/chrome-extension-client.mjs submit_composer_once '{"tab_id":123,"su
 BEL-01 must refuse it because B.2a permits only one first-turn submission identity per child tab.
 
 Use `show_chatgpt_tab` for human acceptance and confirm exactly one copy of the user prompt exists.
-B.2a binds the conversation but does not yet reconstruct or return the assistant response; that is
-BEL-01B.2b.
+
+## 7. BEL-01B.2b response observation
+
+B.2b reads only the conversation already bound to a governed B.2a submission receipt. It does not
+submit, navigate, scrape the DOM, or enumerate unrelated conversations.
+
+After reloading the B.2b extension, explicitly reattach the original child tab, then request the
+response using the original submission ID and exact prompt:
+
+```bash
+node scripts/chrome-extension-client.mjs attach '{"tab_id":709320721}'
+
+node scripts/chrome-extension-client.mjs observe_submission_response '{"submission_id":"bel01b2-canary-001","text":"Reply with exactly: BEL-01B.2 ACK","wait_ms":10000}'
+```
+
+For the accepted B.2a canary, a completed receipt should include:
+
+- `status: "completed"`;
+- the same bound conversation ID/URL;
+- `response: "BEL-01B.2 ACK"`;
+- explicit response lengths/truncation metadata;
+- a response SHA-256 fingerprint;
+- `at_most_once: true`.
+
+If generation is still in progress, the observer returns `status: "running"`. Calling the observer
+again is read-only and cannot resubmit the prompt.
+
+The observer requires the original prompt text so it can prove that the supplied text hashes to the
+governed submission receipt and that the current branch contains exactly one matching user turn.
+A prompt mismatch or conversation mismatch is a hard failure and returns no assistant content.
+
+Response text is returned to the caller but is not persisted in `chrome.storage.local`. The ledger
+stores only bounded verification metadata.
 
 After attachment, reload or navigate that ChatGPT tab and inspect sanitized events:
 
