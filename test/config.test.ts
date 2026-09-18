@@ -59,7 +59,13 @@ test("loads and validates Shellby TOML config", async (t) => {
     port: 3333,
     workspace: "~/Work",
     shell: { path: "/bin/zsh", rtk: false },
-    chatgpt: { cdp_endpoint: "http://127.0.0.1:9222", project_url: "https://chatgpt.com/", max_delegated_agents: 5 },
+    chatgpt: {
+      transport: "cdp",
+      cdp_endpoint: "http://127.0.0.1:9222",
+      extension_bridge_url: "http://127.0.0.1:9233",
+      project_url: "https://chatgpt.com/",
+      max_delegated_agents: 5,
+    },
     ngrok: { enabled: true, api_port: 4040, url: "https://shellby.ngrok.app", pooling_enabled: true },
     mcp: { tool_output: "structured" },
     ui: { enabled: true },
@@ -328,4 +334,21 @@ test("local PM2 ecosystem needs neither ngrok executable nor native configuratio
   })
   assert.equal(module.exports.apps.length, 1)
   assert.equal(module.exports.apps[0]!.name, "shellby-mcp")
+})
+
+
+test("accepts BEL-01 extension transport configuration", async (t) => {
+  const root = await tempDir(t, "shellby-config-extension-transport-")
+  const path = join(root, "config.toml")
+  await writeFile(
+    path,
+    [
+      "[chatgpt]",
+      'transport = "extension"',
+      'extension_bridge_url = "http://127.0.0.1:9233"',
+    ].join("\n")
+  )
+  const loaded = loadPublicConfig(path)
+  assert.equal(loaded.chatgpt.transport, "extension")
+  assert.equal(loaded.chatgpt.extension_bridge_url, "http://127.0.0.1:9233")
 })
