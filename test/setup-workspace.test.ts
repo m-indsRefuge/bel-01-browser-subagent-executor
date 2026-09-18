@@ -47,7 +47,9 @@ test("setup creates all defaults and preserves existing partial configs", async 
   assert.equal(scaffold.workspace, "~/Desktop/agent-workspace")
   assert.deepEqual(scaffold.shell, { path: "/bin/zsh", rtk: false })
   assert.deepEqual(scaffold.chatgpt, {
+    transport: "cdp",
     cdp_endpoint: "http://127.0.0.1:9222",
+    extension_bridge_url: "http://127.0.0.1:9233",
     project_url: "https://chatgpt.com/",
     max_delegated_agents: 3,
   })
