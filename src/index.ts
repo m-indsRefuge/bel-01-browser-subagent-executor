@@ -54,7 +54,15 @@ console.log(`Shell tools: ${shells ? `enabled (${MCP_CONFIG.shell.path}, max ${s
 console.log(`Agent MCP audit log: ${auditLogPath}`)
 console.log(`Computer Use: ${peekaboo ? `enabled via Peekaboo CLI (${MCP_CONFIG.peekaboo.executable})` : "disabled"}`)
 if (peekaboo) console.log(`Agent cursor: ${cursorHostStarted ? "enabled" : "disabled"}`)
-console.log(`ChatGPT agents: ${chatGptSubagents ? `enabled via attach-only CDP ${MCP_CONFIG.chatGpt.cdpEndpoint}` : "disabled"}`)
+console.log(
+  `ChatGPT agents: ${
+    chatGptSubagents
+      ? MCP_CONFIG.chatGpt.transport === "extension"
+        ? `enabled via BEL-01 extension bridge ${MCP_CONFIG.chatGpt.extensionBridgeUrl}`
+        : `enabled via attach-only CDP ${MCP_CONFIG.chatGpt.cdpEndpoint}`
+      : "disabled"
+  }`
+)
 
 let shuttingDown = false
 const shutdown = async (signal: string) => {
