@@ -301,8 +301,8 @@ a metadata-only comparison. A write is accepted only if it remains stable after 
 
 Clear behavior:
 A clear operation first verifies the exact expected draft. If already empty, it succeeds
-idempotently without mutation. Otherwise it prepares a selection and uses only a Backspace CDP key
-event, then waits and verifies emptiness.
+idempotently without mutation. Otherwise it focuses the validated composer and uses browser-native
+Ctrl/Command+A followed by Backspace through CDP input events, then waits and verifies emptiness.
 
 Do not:
 Do not accept immediate DOM equality as proof that the application has adopted the draft state.
@@ -394,13 +394,20 @@ Verify Codex source commit, architecture, Rust/Cargo versions, and SHA-256 befor
 - read-only composer discovery finds the visible #prompt-textarea and rejects the hidden textarea: PASS
 - no prompt entered or submitted during BEL-01B: PASS
 
-## BEL-01B.1 acceptance target
-- focused composer-draft tests and typecheck pass;
-- one fresh isolated ChatGPT tab is attached;
-- exactly one visible editable composer is selected;
-- a canary draft is inserted through CDP Input.insertText without submission;
-- the draft remains present after DRAFT_STABILIZATION_MS and verification reports verified=true;
-- human visual inspection confirms the canary is present but unsent;
-- clear_composer_draft either clears the exact expected canary or safely reports already_empty=true;
-- clear verification remains stable after DRAFT_STABILIZATION_MS;
-- human visual inspection confirms the composer is empty and no conversation was created.
+## BEL-01B.1 live acceptance receipt
+- hardened bridge health is clean with extension_connected=true and empty command/result queues: PASS
+- three consecutive authenticated bridge ping round-trips: PASS
+- one fresh isolated ChatGPT tab is created and attached: PASS
+- exactly one visible editable composer is selected: PASS
+- canary draft inserted through CDP Input.insertText without submission: PASS
+- draft remains present after DRAFT_STABILIZATION_MS with verified=true: PASS
+- independent comparison reports current_length=38, expected_length=38, exact_match=true,
+  newline_normalized_match=true, and canonical_match=true: PASS
+- explicit show_chatgpt_tab reveals the child tab for human inspection: PASS
+- human visual inspection confirms the canary is present and unsent: PASS
+- revised clear_composer_draft removes the exact expected canary: PASS
+- human visual inspection confirms the composer is empty after clear: PASS
+- submitted remains false throughout the observed workflow: PASS
+
+Final BEL-01B.1 milestone closure still requires the focused composer-draft tests and TypeScript
+typecheck to be rerun against the latest native-clear/show-tab revision.
