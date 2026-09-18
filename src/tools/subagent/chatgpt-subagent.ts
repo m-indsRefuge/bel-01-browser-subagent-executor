@@ -580,17 +580,17 @@ export function createChatGptSubagentService(): ChatGptSubagentService {
     turn.settle()
   }
 
-  async function createManagedPage(): Promise<Page> {
-    if (!browser || !context) throw new ChatGptSubagentError("BROWSER_UNAVAILABLE", "ChatGPT browser is not connected.")
-    return createBackgroundPage(browser, context)
+  async function createManagedPage(signal?: AbortSignal): Promise<ChatGptManagedPage> {
+    await transport.ensureConnected(signal)
+    return transport.createPage(signal)
   }
 
-  function assertAgentPage(page: Page, agent: BrowserAgentState): void {
+  function assertAgentPage(page: ChatGptManagedPage, agent: BrowserAgentState): void {
     if (isExpectedAgentPage(page, agent)) return
     throw new ChatGptSubagentError("AGENT_TARGET_LOST", `Agent ${agent.agentId} no longer owns a usable ChatGPT page.`)
   }
 
-  function isExpectedAgentPage(page: Page, agent: BrowserAgentState): boolean {
+  function isExpectedAgentPage(page: ChatGptManagedPage, agent: BrowserAgentState): boolean {
     if (page.isClosed() || !isChatGptUrl(page.url())) return false
     const currentConversationId = extractConversationId(page.url())
     const expectedConversationId = agent.conversationUrl ? extractConversationId(agent.conversationUrl) : undefined
@@ -660,17 +660,12 @@ export function createChatGptSubagentService(): ChatGptSubagentService {
 
   async function detectRateLimit(): Promise<void> {
     assertNotRateLimited()
-    for (const page of context?.pages() ?? []) {
-      if (!isChatGptUrl(page.url())) continue
-      const visible = await page
-        .locator(RATE_LIMIT_SELECTOR)
-        .first()
-        .isVisible()
-        .catch(() => false)
-      if (!visible) continue
-      rateLimitedUntil = Date.now() + RATE_LIMIT_COOLDOWN_MS
-      throw new ChatGptSubagentError("SUBAGENT_RATE_LIMITED", RATE_LIMIT_ERROR_MESSAGE)
-    }
+    if (!(await transport.detectRateLimit())) return
+    rateLimitedUntil = Date.now() + RATE_LIMIT_COOLDOWN_MS
+    throw new ChatGptSubagentError(
+      "SUBAGENT_RATE_LIMITED",
+      RATE_LIMIT_ERROR_MESSAGE
+    )
   }
 
   async function cleanupIdleAgents(): Promise<void> {
@@ -695,7 +690,9 @@ export function createChatGptSubagentService(): ChatGptSubagentService {
 
         if ((activeOperation && !activeOperation.turnId) || now - agent.lastUsedAt < AGENT_IDLE_TTL_MS) continue
         const page = agent.page
-        if (page && !page.isClosed()) await page.close().catch(() => undefined)
+        if (page && !page.isClosed()) {
+          await transport.closePage(page).catch(() => undefined)
+        }
         if (agent.page === page) agent.page = undefined
       }
     }
