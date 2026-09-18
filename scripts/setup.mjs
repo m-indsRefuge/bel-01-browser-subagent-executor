@@ -57,7 +57,10 @@ if (MCP_CONFIG.tools.computer) {
   note("Computer Use", combinedOutput(computer))
 }
 
-if (MCP_CONFIG.tools.clones || MCP_CONFIG.tools.subagents) {
+if (
+  (MCP_CONFIG.tools.clones || MCP_CONFIG.tools.subagents) &&
+  MCP_CONFIG.chatGpt.transport === "cdp"
+) {
   const browser = await commandStep(
     "Preparing multi-agent Chrome",
     "Multi-agent Chrome checked",
