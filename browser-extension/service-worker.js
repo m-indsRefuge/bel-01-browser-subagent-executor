@@ -309,8 +309,20 @@ async function handleCommand(command) {
 
       const verification = await evaluateDraftComparison(tab.id, text)
       if (!verification.newline_normalized_match) {
+        const diagnostics = [
+          `current_length=${String(verification.current_length)}`,
+          `expected_length=${String(verification.expected_length)}`,
+          `normalized_current_length=${String(verification.normalized_current_length)}`,
+          `normalized_expected_length=${String(verification.normalized_expected_length)}`,
+          `first_difference_index=${String(verification.first_difference_index)}`,
+          `canonical_match=${String(verification.canonical_match)}`,
+          `zero_width_count=${String(verification.zero_width_count)}`,
+          `nbsp_count=${String(verification.nbsp_count)}`,
+          `crlf_count=${String(verification.crlf_count)}`,
+          `trailing_newline_count=${String(verification.trailing_newline_count)}`,
+        ].join(" ")
         throw new Error(
-          "Composer draft was not stable after React reconciliation. Do not retry automatically."
+          `Composer draft was not stable after React reconciliation. ${diagnostics}. Do not retry automatically.`
         )
       }
 
