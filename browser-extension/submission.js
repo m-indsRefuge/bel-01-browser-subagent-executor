@@ -44,8 +44,20 @@ export function buildSubmitButtonProbeExpression() {
         const enabled =
           !element.hasAttribute("disabled") &&
           element.getAttribute("aria-disabled") !== "true";
+        const x = rect.left + rect.width / 2;
+        const y = rect.top + rect.height / 2;
+        const hit = document.elementFromPoint(x, y);
+        const hittable = hit === element || (hit && element.contains(hit));
 
-        if (visible && enabled) candidates.push({ element, selector });
+        if (visible && enabled && hittable) {
+          candidates.push({
+            selector,
+            x,
+            y,
+            width: rect.width,
+            height: rect.height,
+          });
+        }
       }
     }
 
@@ -55,16 +67,15 @@ export function buildSubmitButtonProbeExpression() {
       );
     }
 
-    const { element, selector } = candidates[0];
-    const rect = element.getBoundingClientRect();
+    const candidate = candidates[0];
 
     return {
       click_ready: true,
-      selector_hint: selector,
-      x: rect.left + rect.width / 2,
-      y: rect.top + rect.height / 2,
-      width: rect.width,
-      height: rect.height,
+      selector_hint: candidate.selector,
+      x: candidate.x,
+      y: candidate.y,
+      width: candidate.width,
+      height: candidate.height,
       submitted: false,
     };
   })()`
