@@ -43,6 +43,8 @@ export function createBridgeServer({
   const results = new Map()
   const events = []
   const waiters = new Set()
+  const eventWaiters = new Set()
+  let nextEventSequence = 1
   let extensionLastSeenAt = null
   let extensionClientId = null
 
@@ -112,7 +114,25 @@ export function createBridgeServer({
       }
 
       if (req.method === "GET" && url.pathname === "/operator/events") {
-        sendJson(res, 200, { events })
+        const after = parseNonnegativeInteger(url.searchParams.get("after"), 0)
+        const waitMs = Math.min(
+          parseNonnegativeInteger(url.searchParams.get("wait_ms"), 0),
+          30_000
+        )
+
+        if (waitMs > 0 && !events.some((event) => event.sequence > after)) {
+          await waitForEvent(waitMs)
+        }
+
+        const selected = events.filter((event) => event.sequence > after)
+        sendJson(res, 200, {
+          events: selected,
+          next_sequence:
+            selected.at(-1)?.sequence ??
+            events.at(-1)?.sequence ??
+            after,
+          oldest_sequence: events[0]?.sequence ?? nextEventSequence,
+        })
         return
       }
 
@@ -155,12 +175,15 @@ export function createBridgeServer({
       if (req.method === "POST" && url.pathname === "/extension/event") {
         extensionLastSeenAt = Date.now()
         const body = await readJson(req)
-        events.push({
+        const event = {
           ...body,
+          sequence: nextEventSequence++,
           received_at: new Date().toISOString(),
-        })
+        }
+        events.push(event)
         if (events.length > MAX_EVENTS) events.splice(0, events.length - MAX_EVENTS)
-        sendJson(res, 202, { accepted: true })
+        wakeEventWaiters()
+        sendJson(res, 202, { accepted: true, sequence: event.sequence })
         return
       }
 
@@ -188,6 +211,25 @@ export function createBridgeServer({
   function wakeOneWaiter() {
     const waiter = waiters.values().next().value
     waiter?.()
+  }
+
+  function waitForEvent(timeoutMs) {
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        eventWaiters.delete(done)
+        resolve()
+      }, timeoutMs)
+      const done = () => {
+        clearTimeout(timer)
+        eventWaiters.delete(done)
+        resolve()
+      }
+      eventWaiters.add(done)
+    })
+  }
+
+  function wakeEventWaiters() {
+    for (const waiter of [...eventWaiters]) waiter()
   }
 
   function expireQueuedCommands() {
@@ -225,6 +267,7 @@ export function createBridgeServer({
     },
     async close() {
       for (const waiter of [...waiters]) waiter()
+      for (const waiter of [...eventWaiters]) waiter()
       await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())))
     },
   }
@@ -279,4 +322,10 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   }
   process.once("SIGINT", stop)
   process.once("SIGTERM", stop)
+}
+
+function parseNonnegativeInteger(value, fallback) {
+  if (typeof value !== "string" || value.length === 0) return fallback
+  const parsed = Number.parseInt(value, 10)
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback
 }
