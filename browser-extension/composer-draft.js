@@ -77,8 +77,9 @@ function buildComposerMutationExpression({ mode, textLiteral }) {
     const tag = element.tagName.toLowerCase();
     const isTextarea = tag === "textarea";
     const currentText = isTextarea ? element.value : (element.innerText || element.textContent || "");
+    const meaningfulCurrentText = currentText.replace(/\u200B/g, "").trim();
 
-    if (mode === "write" && currentText.length !== 0) {
+    if (mode === "write" && meaningfulCurrentText.length !== 0) {
       throw new Error("BEL-01B.1 refuses to overwrite a non-empty composer.");
     }
 
@@ -115,9 +116,15 @@ function buildComposerMutationExpression({ mode, textLiteral }) {
 
     const observedText = isTextarea ? element.value : (element.innerText || element.textContent || "");
     const expectedText = mode === "write" ? intendedText : "";
+    const normalizedObservedText = observedText.replace(/\r\n/g, "\n");
+    const normalizedExpectedText = expectedText.replace(/\r\n/g, "\n");
+    const composerEmpty = normalizedObservedText.replace(/\u200B/g, "").trim().length === 0;
 
-    if (observedText !== expectedText) {
+    if (mode === "write" && normalizedObservedText !== normalizedExpectedText) {
       throw new Error("Composer draft verification failed.");
+    }
+    if (mode === "clear" && !composerEmpty) {
+      throw new Error("Composer draft clear verification failed.");
     }
 
     return {
@@ -125,7 +132,7 @@ function buildComposerMutationExpression({ mode, textLiteral }) {
       selector_hint: selector,
       tag,
       characters_written: mode === "write" ? intendedText.length : 0,
-      composer_empty: observedText.length === 0,
+      composer_empty: composerEmpty,
       verified: true,
       submitted: false,
     };
