@@ -22,7 +22,9 @@ const publicConfigSchema = z.object({
     rtk: z.boolean().default(false),
   }),
   chatgpt: z.object({
+    transport: z.enum(["cdp", "extension"]).default("cdp"),
     cdp_endpoint: cdpEndpoint.default("http://127.0.0.1:9222"),
+    extension_bridge_url: httpUrl.default("http://127.0.0.1:9233"),
     project_url: httpUrl.default("https://chatgpt.com/"),
     max_delegated_agents: z.number().int().positive().default(3),
   }),
