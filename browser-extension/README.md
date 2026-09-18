@@ -172,13 +172,13 @@ Recovery only inspects the original ledger/tab for binding. It cannot resend.
 After a successful bound receipt, deliberately call `submit_composer_once` again with the same
 submission_id. BEL-01 must return the existing bound receipt without clicking Send again.
 
-Then deliberately try a second submission ID with the same tab and prompt:
+Then deliberately try a second submission ID on the same child tab:
 
 ```bash
 node scripts/chrome-extension-client.mjs submit_composer_once '{"tab_id":123,"submission_id":"bel01b2-canary-002","text":"Reply with exactly: BEL-01B.2 ACK"}'
 ```
 
-BEL-01 must refuse it as an already tracked tab + prompt identity.
+BEL-01 must refuse it because B.2a permits only one first-turn submission identity per child tab.
 
 Use `show_chatgpt_tab` for human acceptance and confirm exactly one copy of the user prompt exists.
 B.2a binds the conversation but does not yet reconstruct or return the assistant response; that is
