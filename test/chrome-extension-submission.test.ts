@@ -83,8 +83,8 @@ test("service worker persists armed receipt before Send-button click", async () 
   assert.ok(source.includes("prompt_sha256: promptSha256"))
   assert.ok(source.includes("chrome.storage.local.set"))
   assert.ok(source.includes("refusing duplicate submission"))
-  assert.ok(source.includes("refusing a second submission identity"))
-  assert.ok(source.includes("findSubmissionReceiptByIdentity"))
+  assert.ok(source.includes("allows only one first-turn submission per tab"))
+  assert.ok(source.includes("findSubmissionReceiptByTab"))
   assert.ok(source.includes("Use recover_prompt_submission instead."))
   assert.ok(source.includes('"Input.dispatchMouseEvent"'))
   assert.ok(source.includes('type: "mousePressed"'))
@@ -136,7 +136,7 @@ test("recovery path cannot resend", async () => {
 })
 
 
-test("ledger identity scan blocks alternate submission ids for the same tab and prompt", async () => {
+test("ledger tab lock blocks any second first-turn submission on the same tab", async () => {
   const source = await readFile(
     new URL("../browser-extension/service-worker.js", import.meta.url),
     "utf8"
@@ -144,8 +144,8 @@ test("ledger identity scan blocks alternate submission ids for the same tab and 
 
   assert.ok(source.includes("chrome.storage.local.get(null)"))
   assert.ok(source.includes('key.startsWith("bel01_submission:")'))
-  assert.ok(source.includes("value.tab_id === tabId && value.prompt_sha256 === promptSha256"))
-  assert.ok(source.includes("already tracked by submission_id"))
+  assert.ok(source.includes("value.tab_id === tabId"))
+  assert.ok(source.includes("This child tab is already tracked by submission_id"))
 })
 
 
