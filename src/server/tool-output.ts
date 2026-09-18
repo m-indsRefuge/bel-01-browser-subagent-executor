@@ -82,10 +82,35 @@ function renderSubagentResult(value: unknown): string {
         const item = turn[key]
         if (item !== undefined && isInlineScalar(item)) metadata.push(`${key}=${formatScalar(item)}`)
       }
+
+      const permissionRequest = isRecord(turn.permission_request)
+        ? turn.permission_request
+        : undefined
+      if (permissionRequest) {
+        for (const key of ["request_id", "capability"] as const) {
+          const item = permissionRequest[key]
+          if (item !== undefined && isInlineScalar(item)) {
+            metadata.push(`${key}=${formatScalar(item)}`)
+          }
+        }
+      }
+
       if (metadata.length === 0) return renderRecordListItem(turn, 0)
+
+      const permissionBody = permissionRequest
+        ? renderStructuredContent({
+            ...(permissionRequest.reason !== undefined
+              ? { reason: permissionRequest.reason }
+              : {}),
+            ...(permissionRequest.scope !== undefined
+              ? { scope: permissionRequest.scope }
+              : {}),
+          })
+        : ""
 
       const bodies = [
         typeof turn.response === "string" && turn.response ? turn.response : "",
+        permissionBody,
         typeof turn.error === "string" && turn.error ? turn.error : "",
       ].filter(Boolean)
       return formatOutputBlock(metadata, bodies.join("\n\n"))
