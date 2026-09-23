@@ -73,7 +73,7 @@ test(
     })
 
     try {
-      MCP_CONFIG.chatGpt.transport = "extension"
+      MCP_CONFIG.chatGpt.transport = "cdp"
       Object.assign(MCP_CONFIG.tools, {
         review: false,
         shell: false,
