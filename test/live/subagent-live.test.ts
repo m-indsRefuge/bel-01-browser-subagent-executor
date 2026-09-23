@@ -100,9 +100,14 @@ test(
           agents: [{ agent_id: liveAgentId, prompt: firstPrompt }],
         },
       })
+      const firstRunText = toolText(firstRun.content)
       const firstRunTurn = getStructuredRunTurn(firstRun)
       artifact.first_run = firstRunTurn
+      if (firstRunTurn.status === "failed") artifact.first_run_compact = firstRunText
       t.diagnostic(`Turn 1 start result: ${JSON.stringify(firstRunTurn)}`)
+      if (firstRunTurn.status === "failed") {
+        t.diagnostic(`Turn 1 compact failure:\n${firstRunText}`)
+      }
       assert.equal(firstRunTurn.agent_id, liveAgentId)
       assert.equal(
         firstRunTurn.status,
@@ -285,14 +290,23 @@ function getStructuredRunTurn(result: {
 
 function getRunTurn(text: string): StructuredRunTurn {
   const match = text.match(
-    /^- agent_id=("(?:\\.|[^"\\])*"|\S+)(?: turn_id=("(?:\\.|[^"\\])*"|\S+))? status=(running|failed)(?: error=("(?:\\.|[^"\\])*"|\S+))?$/m
+    /^- agent_id=("(?:\\.|[^"\\])*"|\S+)(?: turn_id=("(?:\\.|[^"\\])*"|\S+))? status=(running|failed)(?: error=("(?:\\.|[^"\\])*"|\S+))?/m
   )
   assert.ok(match, "subagent_run must return exactly one live turn")
+
+  const inlineError = match[4] ? decodeCompactScalar(match[4]) : undefined
+  const multilineError =
+    text.match(/(?:^|\n)\s*error:\n((?:\s{4,}.*(?:\n|$))+)/)?.[1]
+      ?.split("\n")
+      .map((line) => line.replace(/^\s{4}/, ""))
+      .join("\n")
+      .trim()
+
   return {
     agent_id: decodeCompactScalar(match[1]!),
     ...(match[2] ? { turn_id: decodeCompactScalar(match[2]) } : {}),
     status: match[3] as StructuredRunTurn["status"],
-    ...(match[4] ? { error: decodeCompactScalar(match[4]) } : {}),
+    ...(inlineError || multilineError ? { error: inlineError ?? multilineError } : {}),
   }
 }
 
